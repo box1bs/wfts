@@ -29,21 +29,16 @@ func makeAbsoluteURL(rawURL string, baseURL *url.URL) (string, error) {
 	return resolved.String(), nil
 }
 
-func normalizeUrl(rawUrl string) (string, error) {
-	p, err := url.Parse(rawUrl)
-	if err != nil {
-		return "", err
-	}
+func normalizeUrl(uri *url.URL) (string, error) {
+	host := strings.TrimPrefix(strings.ToLower(truncatePort(uri)), "www.")
 
-	host := strings.TrimPrefix(strings.ToLower(p.Hostname()), "www.")
-
-	path := p.Path
+	path := uri.Path
 	if strings.Contains(path, "//") {
 		path = strings.ReplaceAll(path, "//", "/")
 	}
 	path = strings.TrimSuffix(path, "/")
 
-	query := p.Query().Encode()
+	query := uri.Query().Encode()
 	var sb strings.Builder
 	sb.WriteString(host)
 	sb.WriteString(path)

@@ -21,7 +21,7 @@ import (
 )
 
 type indexer interface {
-    HandleDocumentWords(context.Context, *model.Document, []model.Passage) (int, error)
+    HandleDocumentWords(context.Context, *model.Document, *float64, []model.Passage) error
 	SaveUrlsToBank([32]byte, []byte) error
 	GetUrlsByHash([32]byte) ([]byte, error)
 }
@@ -59,9 +59,9 @@ func NewScrapeConfig(baseUrls []string, logWriter io.Writer, workerNum, depth in
 
 const (
 	userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
- 	crawlTime = 600 * time.Second
+ 	crawlTime = 300 * time.Second
  	deadlineTime = 15 * time.Second
-	numOfTries = 2 // если кто то решил поменять это на 0, чтож, удачи
+	numOfTries = 3 // если кто то решил поменять это на 0, чтож, удачи
 )
 
 func NewScraper(mp *sync.Map, cfg *configData, idx indexer, c context.Context) *WebScraper {
@@ -118,7 +118,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
         return
     }
 	
-    normalized, err := normalizeUrl(currentURL.String())
+    normalized, err := normalizeUrl(currentURL)
     if err != nil {
 		return
     }
@@ -167,12 +167,9 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 				}
 			}
 		} else {
-			var uniqTokenCount int
-			links, uniqTokenCount, err = ws.fetchHTMLcontent(ctx, currentURL, normalized, depth)
-			if err != nil {
+			if links, err = ws.fetchHTMLcontent(ctx, &priority, currentURL, normalized, depth); err != nil {
 				return
 			}
-			priority += math.Log(float64(uniqTokenCount) + 1)
 		}
 
 		l := len(links)
@@ -197,12 +194,17 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 		}
 	}
 	
-	for _, link := range links {	
+	for _, link := range links {
 		if ws.cfg.OnlySameDomain && !link.SameDomain {
 			continue
 		}
 
 		if ws.checkContext(ctx) { return }
+
+		pr := priority
+		if link.SameDomain {
+			pr *= 2
+		}
 
         ws.pool.Submit(model.CrawlNode{Activation: func() {
 			ws.rlMu.Lock()
@@ -217,7 +219,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 			defer cancel()
 			ws.ScrapeWithContext(c, link.Link, depth + 1)
 		},
-			Priority: priority / float64(depth + 1),
+			Priority: pr / float64(depth + 1),
 		})
     }
 }

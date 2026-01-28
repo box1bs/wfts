@@ -25,22 +25,22 @@ type linkToken struct {
 	SameDomain 	bool
 }
 
-func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, cur *url.URL, norm string, gd int) ([]*linkToken, int, error) {
+func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *url.URL, norm string, gd int) ([]*linkToken, error) {
 	ws.rlMu.RLock()
 	rl := ws.rlMap[cur.Host]
 	ws.rlMu.RUnlock()
 	doc, err := ws.getHTML(ctx, cur.String(), rl, numOfTries)
 	log := ctx.Value(0).(*model.Logger)
 	if log == nil {
-		return nil, 0, fmt.Errorf("context canceled")
+		return nil, fmt.Errorf("context canceled")
 	}
     if err != nil {
 		log.Errorf("error getting html: %v", err)
-        return nil, 0, err
+        return nil, err
     }
 	if doc == "" {
 		log.Debugf("empty html content")
-        return nil, 0, fmt.Errorf("empty html content on page: %s", cur)
+        return nil, fmt.Errorf("empty html content on page: %s", cur)
 	}
 	
 	hashed := sha256.Sum256([]byte(norm))
@@ -56,20 +56,15 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, cur *url.URL, norm s
 		ws.lru.Put(hashed, links)
 	}
 
-	uniqTokenCount, err := ws.idx.HandleDocumentWords(ctx, document, passages)
-	if err != nil {
-		return nil, 0, err
-	}
-	return links, uniqTokenCount, err
+	return links, ws.idx.HandleDocumentWords(ctx, document, pr, passages)
 }
 
 func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, currentDeep int) (links []*linkToken, pasages []model.Passage) {
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
-	var tagStack [][2]byte
-	var garbageTagStack []string
-	var rawTextBuilder strings.Builder 
-	links = make([]*linkToken, 0)
-	visit := make([]*linkToken, 0)
+	var headerType byte
+	var garbageTagCounter int
+	links = make([]*linkToken, 0, 64)
+	visit := make([]*linkToken, 0, 16)
 
 	ws.rlMu.RLock()
 	rules := ws.rulesMap[truncatePort(baseURL)]
@@ -78,7 +73,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	log := ctx.Value(0).(*model.Logger)
 
 	tokenCount := 0
-	const checkContextEvery = 10
+	const checkContextEvery = 128
 
 	for {
 		tokenCount++
@@ -104,22 +99,22 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 
 		switch tokenType {
 		case html.StartTagToken:
-			if len(garbageTagStack) > 0 {
+			if garbageTagCounter > 0 {
 				continue
 			}
 
 			t := tokenizer.Token()
-			tagName := strings.ToLower(t.Data)
+			tagName := t.Data
 			switch tagName {
 			case "h1", "h2":
-				tagStack = append(tagStack, [2]byte{'h', tagName[1]})
+				headerType += tagName[1]
 
 			case "div":
 				for _, attr := range t.Attr {
 					if attr.Key == "class" || attr.Key == "id" {
-						val := strings.ToLower(attr.Val)
+						val := attr.Val
 						if strings.Contains(val, "ad") || strings.Contains(val, "banner") || strings.Contains(val, "promo") {
-							garbageTagStack = append(garbageTagStack, tagName)
+							garbageTagCounter++
 							break
 						}
 					}
@@ -127,21 +122,39 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 
 			case "a":
 				for _, attr := range t.Attr {
-					if strings.ToLower(attr.Key) == "href" {
+					if attr.Key == "href" {
 						link, err := makeAbsoluteURL(attr.Val, baseURL)
 						if err != nil {
 							break
 						}
 						if link != "" {
-							normalized, err := normalizeUrl(link)
-							if err != nil {
-								log.Errorf("error normalizing url: %v", err)
-								break
-							}
 							uri, err := url.Parse(link)
 							if err != nil || uri == nil {
 								log.Errorf("error parsing link: %v", err)
 								break
+							}
+							normalized, err := normalizeUrl(uri)
+							if err != nil {
+								log.Errorf("error normalizing url: %v", err)
+								break
+							}
+							if path := uri.Path; strings.Contains(path, "pdf") || strings.Contains(path, "xml") {
+								log.Infof("potential pdf or xml link: %s", uri.String())
+								break
+							}
+							if types := uri.Query()["format"]; len(types) > 0 {
+								var allowed bool
+								for _, t := range types {
+									if t == "html" {
+										allowed = true
+										break
+									}
+								}
+
+								if !allowed {
+									log.Infof("potential non-html link: %s", uri.String())
+									break
+								}
 							}
 							if rules != nil {
 								if !rules.IsAllowed(userAgent, uri.Path) {
@@ -162,42 +175,40 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 				}
 
 			case "script", "style", "iframe", "aside", "nav", "footer":
-				garbageTagStack = append(garbageTagStack, tagName)
+				garbageTagCounter++
 
 			}
 
 		case html.EndTagToken:
 			t := tokenizer.Token()
 			tagName := strings.ToLower(t.Data)
-			if tagName[0] == 'h' {
-				if len(tagStack) > 0 && len(tagName) > 1 && tagStack[len(tagStack)-1][1] == tagName[1] {
-					tagStack = tagStack[:len(tagStack)-1]
-				}
+			if tagName[0] == 'h' && len(tagName) > 1 && tagName[1] == '1' || tagName[1] == '2' {
+				headerType -= tagName[1]
 			}
 
-			if len(garbageTagStack) > 0 && garbageTagStack[len(garbageTagStack)-1] == tagName {
-				garbageTagStack = garbageTagStack[:len(garbageTagStack)-1]
+			if garbageTagCounter > 0 && isGarbage(tagName) {
+				garbageTagCounter--
 			}
 
 		case html.TextToken:
-			if len(garbageTagStack) > 0 {
+			if garbageTagCounter > 0 {
 				continue
 			}
 
-			if len(tagStack) > 0 {
-				text := strings.TrimSpace(string(tokenizer.Text()))
-				if text != "" {
-					rawTextBuilder.WriteString(text)
-					pasages = append(pasages, model.NewTypeTextObj[model.Passage](model.HeaderType, text, 0))
+			if headerType > 0 {
+				b := bytes.TrimSpace(tokenizer.Text())
+				if len(b) == 0 {
+    				continue
 				}
+				pasages = append(pasages, model.NewTypeTextObj[model.Passage](model.HeaderType, string(b), 0))
 				continue
 			}
 
-			text := strings.TrimSpace(string(tokenizer.Text()))
-			if text != "" {
-				rawTextBuilder.WriteString(text)
-				pasages = append(pasages, model.NewTypeTextObj[model.Passage](model.BodyType, text, 0))
+			b := bytes.TrimSpace(tokenizer.Text())
+			if len(b) == 0 {
+    			continue
 			}
+			pasages = append(pasages, model.NewTypeTextObj[model.Passage](model.BodyType, string(b), 0))
 
 		}
 	}
@@ -207,15 +218,25 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	return
 }
 
+func isGarbage(tag string) bool {
+	garbageTags := []string{"script", "style", "iframe", "aside", "nav", "footer"}
+	for _, t := range garbageTags {
+		if tag == t {
+			return true
+		}
+	}
+	return false
+}
+
 const wantedCharset = "utf-8"
 var metaCharsetRe = regexp.MustCompile(`(?i)<meta\s+[^>]*charset\s*['"]([^'"]+)['"]`)
 
 func (ws *WebScraper) getHTML(ctx context.Context, URL string, rl *rateLimiter, try int) (string, error) {
 	if try <= 0 {
-		return "", fmt.Errorf("http status code: 419, and max amount of tries was reached")
+		return "", fmt.Errorf("http status code: %d, and max amount of tries was reached", http.StatusTooManyRequests)
 	}
 
-	req, err := http.NewRequest("GET", URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", URL, nil)
 	if err != nil {
 		return "", err
 	}

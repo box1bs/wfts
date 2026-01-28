@@ -14,16 +14,12 @@ type MinMaxHeap struct {
 	data []Item
 }
 
-func New() *MinMaxHeap {
+func NewMinMaxHeap() *MinMaxHeap {
 	return &MinMaxHeap{}
 }
 
-func (h *MinMaxHeap) Len() int {
-	return len(h.data)
-}
-
-func (h *MinMaxHeap) Insert(p float64, v *model.CrawlNode) {
-	h.data = append(h.data, Item{p, v})
+func (h *MinMaxHeap) Insert(v *model.CrawlNode) {
+	h.data = append(h.data, Item{v.Priority, v})
 	h.bubbleUp(len(h.data) - 1)
 }
 

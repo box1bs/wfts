@@ -18,7 +18,7 @@ func NewLogger(log *slog.Logger) *Logger {
 
 func Replacer(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.TimeKey {
-		return slog.String("time", a.Value.Time().Format("2006-01-02 15:04:05"))
+		return slog.String("time", a.Value.Time().Format("15:04:05 02-01"))
 	}
 	return a
 }

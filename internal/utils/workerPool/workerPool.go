@@ -22,7 +22,7 @@ func NewWorkerPool(size, queueCapacity int, c context.Context) *WorkerPool {
 	wp := &WorkerPool{
 		buf: 			make(chan struct{}, queueCapacity),
 		quit:      		make(chan struct{}),
-		heap: 			New(),
+		heap: 			NewMinMaxHeap(),
 		wg:        		new(sync.WaitGroup),
 		mu:				new(sync.Mutex),
 		ctx: 			c,
@@ -44,14 +44,14 @@ func (wp *WorkerPool) Submit(task model.CrawlNode) {
 	select {
 	case wp.buf <- struct{}{}:
 		wp.wg.Add(1)
-		wp.heap.Insert(task.Priority, &task)
+		wp.heap.Insert(&task)
 		wp.mu.Unlock()
 
 	default:
 		if worstTask, exist := wp.heap.GetMin(); exist {
 			if task.Priority > worstTask.Value.Priority {
 				wp.heap.DeleteMin()
-				wp.heap.Insert(task.Priority, &task)
+				wp.heap.Insert(&task)
 			}
 		}
 		wp.mu.Unlock()

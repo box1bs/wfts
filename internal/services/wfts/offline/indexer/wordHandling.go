@@ -9,7 +9,7 @@ import (
 	"wfts/internal/services/wfts/offline/indexer/textHandling"
 )
 
-func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, passages []model.Passage) (int, error) {
+func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, priority *float64, passages []model.Passage) error {
 	stem := map[string]int{}
 	i := 0
 	pos := map[string][]model.Position{}
@@ -19,13 +19,13 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 
 	logger := ctx.Value(0).(*model.Logger)
 	if logger == nil {
-		return 0, fmt.Errorf("context canceled")
+		return fmt.Errorf("context canceled")
 	}
 	allWordTokens := []string{}
 	for _, passage := range passages {
 		orig, stemmed, err := idx.stemmer.TokenizeAndStem(passage.Text)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		if len(stemmed) == 0 {
 			continue
@@ -47,14 +47,14 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		sign := idx.minHash.CreateSignature(allWordTokens)
 		conds, err := idx.repository.GetSimilarSignatures(sign)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		if simRate := calcSim(sign, conds); simRate > 0.8 {
 			logger.Debugf("finded %f similar page, with word tokens len: %d", simRate, len(allWordTokens))
-			return 0, fmt.Errorf("page already indexed")
+			return fmt.Errorf("page already indexed")
 		}
 		if err := idx.repository.IndexDocShingles(sign); err != nil {
-			return 0, err
+			return err
 		}
 	}
 
@@ -63,22 +63,23 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		bigrams[[2]uint64{idx.minHash.Hash64(allWordTokens[j - 1]), idx.minHash.Hash64(allWordTokens[j])}]++
 	}
 	if err := idx.repository.UpdateBiFreq(bigrams); err != nil {
-		return 0, err
+		return err
 	}
 	if err := idx.repository.SaveDocument(doc); err != nil {
 		logger.Errorf("error saving document: %v", err)
-		return 0, err
+		return err
 	}
 	if err := idx.repository.IndexNGrams(allWordTokens, idx.sc.NGramCount); err != nil {
 		logger.Errorf("error indexing ngrams: %v", err)
-		return 0, err
+		return err
 	}
 	if err := idx.repository.IndexDocumentWords(doc.Id, stem, pos); err != nil {
 		logger.Errorf("error indexing document words: %v", err)
-		return 0, err
+		return err
 	}
 
-	return len(pos), nil
+	*priority += math.Log(float64(len(pos)) + 1)
+	return nil
 }
 
 func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string, []map[[32]byte]model.WordCountAndPositions, error) {

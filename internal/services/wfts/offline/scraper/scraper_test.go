@@ -26,7 +26,7 @@ func TestHtmlGetter(t *testing.T) {
     
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            html, err := NewScraper(nil, &configData{}, nil, context.Background()).getHTML(context.Background(), tt.url, NewRateLimiter(1), 3)
+            html, err := NewScraper(nil, &configData{}, nil, context.Background()).getHTML(context.Background(), tt.url, NewRateLimiter(100), 3)
             if err != nil {
                 t.Fatalf("getHTML(%q): %v", tt.url, err)
             }
@@ -129,7 +129,8 @@ func TestNormalizeUrl(t *testing.T) {
     }
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            result, err := normalizeUrl(tt.input)
+            uri, _ := url.Parse(tt.input)
+            result, err := normalizeUrl(uri)
             if result != tt.expected || err != nil {
                 t.Errorf("normalizeUrl(%q) = %q, %v; want %q",
                     tt.input, result, err, tt.expected)
