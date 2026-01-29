@@ -88,7 +88,7 @@ func main() {
 
 	fmt.Printf("Index built with %d documents. Enter search queries (q to exit):\n", count)
 
-	s := searcher.NewSearcher(i, out, ir)
+	s := searcher.NewSearcher(i, ir)
 
 	reader := bufio.NewReader(os.Stdin)
 	for {
@@ -99,7 +99,8 @@ func main() {
 			return
 		}
 		t := time.Now()
-		Present(s.Search(query, 100))
+		r, _ := s.Search(out, query, 100)
+		Present(r)
 		fmt.Printf("--Search time: %v--\n", time.Since(t))
 	}
 }
@@ -149,7 +150,7 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 		}()
 	}
 
-	model := tui.InitModel(lc, cfg.TUIBorderColor, ir.GetDocumentsCount, searcher.NewSearcher(i, lc, ir).Search, c)
+	model := tui.InitModel(lc, cfg.TUIBorderColor, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search, c)
 	if _, err := tea.NewProgram(model).Run(); err != nil {
 		panic(err)
 	}

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -22,6 +23,7 @@ import (
 
 type linkToken struct {
 	Link 		*url.URL
+	Ancore		string // пока просто собираем
 	SameDomain 	bool
 }
 
@@ -52,8 +54,9 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 	c, cancel := context.WithTimeout(ctx, deadlineTime)
 	defer cancel()
     links, passages := ws.parseHTMLStream(c, doc, cur, gd)
-	if len(links) != 0 {
+	if l := len(links); l != 0 {
 		ws.lru.Put(hashed, links)
+		*pr += math.Log(float64(l) + 1)
 	}
 
 	return links, ws.idx.HandleDocumentWords(ctx, document, pr, passages)
@@ -63,6 +66,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
 	var headerType byte
 	var garbageTagCounter int
+	var isAncore bool
 	links = make([]*linkToken, 0, 64)
 	visit := make([]*linkToken, 0, 16)
 
@@ -100,7 +104,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 		switch tokenType {
 		case html.StartTagToken:
 			if garbageTagCounter > 0 {
-				continue
+				break
 			}
 
 			t := tokenizer.Token()
@@ -110,6 +114,10 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 				headerType += tagName[1]
 
 			case "div":
+				if garbageTagCounter > 0 {
+					garbageTagCounter++
+					break
+				}
 				for _, attr := range t.Attr {
 					if attr.Key == "class" || attr.Key == "id" {
 						val := attr.Val
@@ -157,10 +165,11 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								}
 							}
 							if rules != nil {
-								if !rules.IsAllowed(userAgent, uri.Path) {
+								if !rules.IsAllowed(userAgent, uri.Path)  || !rules.IsAllowed("*", uri.Path){
 									break
 								}
 							}
+							isAncore = true
 							same := isSameOrigin(uri, baseURL)
 							if depth, vis := ws.visited.Load(normalized); vis {
 								if depth.(int) > currentDeep {
@@ -182,8 +191,13 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 		case html.EndTagToken:
 			t := tokenizer.Token()
 			tagName := strings.ToLower(t.Data)
-			if tagName[0] == 'h' && len(tagName) > 1 && tagName[1] == '1' || tagName[1] == '2' {
+			if isAncore && tagName[0] == 'a' {
+				isAncore = false
+				continue
+			}
+			if tagName[0] == 'h' && len(tagName) > 1 && (tagName[1] == '1' || tagName[1] == '2') {
 				headerType -= tagName[1]
+				continue
 			}
 
 			if garbageTagCounter > 0 && isGarbage(tagName) {
@@ -191,6 +205,10 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			}
 
 		case html.TextToken:
+			if isAncore && len(links) > 0 {
+				links[len(links) - 1].Ancore = string(bytes.TrimSpace(tokenizer.Text()))
+				continue
+			}
 			if garbageTagCounter > 0 {
 				continue
 			}
@@ -219,7 +237,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 }
 
 func isGarbage(tag string) bool {
-	garbageTags := []string{"script", "style", "iframe", "aside", "nav", "footer"}
+	garbageTags := []string{"script", "style", "iframe", "aside", "nav", "footer", "div"}
 	for _, t := range garbageTags {
 		if tag == t {
 			return true

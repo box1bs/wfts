@@ -7,7 +7,7 @@ import (
 	"math"
 	"sort"
 	"strings"
-	"sync"
+	"time"
 
 	"wfts/internal/model"
 )
@@ -23,16 +23,12 @@ type resitory interface {
 }
 
 type Searcher struct {
-	mu         	*sync.RWMutex
-	wr 			io.Writer
 	idx 		index
 	repo 	 	resitory
 }
 
-func NewSearcher(idx index, wr io.Writer, repo resitory) *Searcher {
+func NewSearcher(idx index, repo resitory) *Searcher {
 	return &Searcher{
-		mu:        	&sync.RWMutex{},
-		wr: 		wr,
 		idx:       	idx,
 		repo: 	 	repo,
 	}
@@ -47,109 +43,101 @@ type requestRanking struct {
 	//any ranking scores
 }
 
-func (s *Searcher) Search(query string, maxLen int) []*model.Document {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	
-	log := model.NewLogger(slog.New(slog.NewJSONHandler(s.wr, &slog.HandlerOptions{
+func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Document, *model.SearchMetrics) {
+	log := model.NewLogger(slog.New(slog.NewJSONHandler(wr, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
 	})).With(slog.String("query", query)))
+	metrics := &model.SearchMetrics{}
+	t1p := time.Now()
 	searchContext := context.WithValue(context.Background(), 0, log)
 	words, index, err := s.idx.HandleTextQuery(searchContext, query)
 	if err != nil {
 		log.Errorf("handling words error: %v",  err)
-		return nil
+		return nil, nil
 	}
+	metrics.HandleQuery = time.Since(t1p)
 	
 	queryLen := len(words)
 	
 	avgLen, err := s.idx.GetAVGLen()
 	if err != nil {
 		log.Errorf("%v", err)
-		return nil
+		return nil, nil
 	}
 	
 	length, err := s.repo.GetDocumentsCount()
 	if err != nil {
 		log.Errorf("%v", err)
-		return nil
+		return nil, nil
 	}
 	
-	rank := make(map[[32]byte]requestRanking)
-	result := make([]*model.Document, 0)
-	alreadyIncluded := make(map[[32]byte]struct{})
-	var wg sync.WaitGroup
-	var rankMu sync.RWMutex
-	var resultMu sync.Mutex
-	tokenFreq := make([]int, queryLen)
-	done := make(chan struct{})
+	t2p := time.Now()
+	rank := make(map[[32]byte]*requestRanking)
+	result := make([]*model.Document, 0, min(1000, length))
+	resChan := make(chan *model.Document, 100)
 
-	for i := range words {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-	
-			idf := math.Log(float64(length) / float64(len(index[i]) + 1)) + 1
-			log.Infof("len documents with word: %s, %d", words[i], len(index[i]))
-			for _, item := range index[i] {
-				tokenFreq[i] += item.Count
-			}
-	
-			for docID, item := range index[i] {
-				rankMu.RLock()
-				doc, err := s.repo.GetDocumentByID(docID)
-				if err != nil || doc == nil {
-					rankMu.RUnlock()
-					log.Infof("error: %v, doc: %v", err, doc)
-					continue
-				}
-				rankMu.RUnlock()
-				
-				rankMu.Lock()
-				r := rank[docID]
-				tf := float64(tokenFreq[i]) / float64(doc.TokenCount)
-				r.tf_idf += tf * idf
-				r.bm25 += calcBM25(idf, tf, doc, avgLen)
-				if r.termProximity == 0 {
-					positions := [][]model.Position{}
-					for i := range words {
-						positions = append(positions, index[i][docID].Positions)
-					}
-					r.termProximity = getMinQueryDistInDoc(positions, queryLen)
-					_, r.logLenWordInURL = boyerMoorAlgorithm(strings.ToLower(doc.URL), words)
-					for i := 0; i < item.Count && !r.hasWordInHeader; i++ {
-						r.hasWordInHeader = item.Positions[i].Type == model.HeaderType
-					}
-				}
-				rank[docID] = r
-				rankMu.Unlock()
-
-				resultMu.Lock()
-				if _, exists := alreadyIncluded[doc.Id]; exists {
-					resultMu.Unlock()
-					continue
-				}
-				alreadyIncluded[docID] = struct{}{}
-				result = append(result, doc)
-				resultMu.Unlock()
-			}
-		}(i)
-	}
-	
+	idf := make([]float64, queryLen)
+	docs := make(map[[32]byte]*model.Document)
 	go func() {
-		wg.Wait()
-		close(done)
+		for doc := range resChan {
+			result = append(result, doc)
+		}
 	}()
+	for i := range words {
+		idf[i] = math.Log(float64(length) / float64(len(index[i]) + 1)) + 1
+		for id := range index[i] {
+			if _, ex := docs[id]; ex {
+				continue
+			}
+			docs[id], err = s.repo.GetDocumentByID(id)
+			if err != nil {
+				return nil, nil
+			}
+			resChan <- docs[id]
+		}
+	}
+	close(resChan)
+
+	for id, doc := range docs {
+		r := &requestRanking{}
+		for i := range words {
+			if item, ex := index[i][id]; ex {
+				tf := float64(item.Count) / float64(docs[id].TokenCount)
+				r.tf_idf += tf * idf[i]
+				r.bm25 += calcBM25(idf[i], tf, doc, avgLen)
+			}
+		}
+		positions := [][]model.Position{}
+		for i := range words {
+			if item, ex := index[i][id]; ex {
+				positions = append(positions, item.Positions)
+			}
+		}
+		r.termProximity = getMinQueryDistInDoc(positions, queryLen)
+		r.logLenWordInURL = boyerMoorAlgorithm(strings.ToLower(doc.URL), words)
+		for i := range words {
+			if item, ex := index[i][id]; ex {
+				for i := 0; i < item.Count && !r.hasWordInHeader; i++ {
+					r.hasWordInHeader = item.Positions[i].Type == model.HeaderType
+				}
+			}
+			if r.hasWordInHeader {
+				break
+			}
+		}
+		rank[id] = r
+	}
 	
 	log.Infof("result len: %d", len(result))
-	
-	<-done
+	metrics.FetchAndProcess = time.Since(t2p)
 
 	length = len(result)
 	if length == 0 {
 		log.Infof("empty result")
-		return nil
+		return nil, nil
 	}
+
+	t3p := time.Now()
 
 	sort.Slice(result, func(i, j int) bool {
 		if rank[result[i].Id].bm25 != rank[result[j].Id].bm25 {
@@ -169,5 +157,7 @@ func (s *Searcher) Search(query string, maxLen int) []*model.Document {
 		return rank[topN[i].Id].hasWordInHeader && !rank[topN[j].Id].hasWordInHeader
 	})
 
-	return topN
+	metrics.Sort = time.Since(t3p)
+	metrics.Total = time.Since(t1p)
+	return topN, metrics
 }

@@ -111,7 +111,7 @@ func TestBoyerMoorAlgorithm(t *testing.T) {
 	
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, log := boyerMoorAlgorithm(tt.base, tt.query); log != tt.expected {
+			if log := boyerMoorAlgorithm(tt.base, tt.query); log != tt.expected {
 				t.Errorf("boyerMoorAlgorithm(%s, %s) = %f, want %f", tt.base, strings.Join(tt.query, ","), log, tt.expected)
 			}
 		})

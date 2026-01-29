@@ -54,7 +54,7 @@ func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 	return minDencity
 }
 
-func boyerMoorAlgorithm(url string, queryWords []string) (bool, float64) {
+func boyerMoorAlgorithm(url string, queryWords []string) float64 {
 	wordInUrl := 0.0
 	urlRunes := []rune(url)
 	ul := len(urlRunes)
@@ -93,5 +93,5 @@ func boyerMoorAlgorithm(url string, queryWords []string) (bool, float64) {
 		}
 	}
 
-	return wordInUrl > 0.0, math.Log(1 + wordInUrl)
+	return math.Log(1 + wordInUrl)
 }

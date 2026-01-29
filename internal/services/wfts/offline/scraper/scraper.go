@@ -6,7 +6,6 @@ import (
 	"encoding/gob"
 	"io"
 	"log/slog"
-	"math"
 
 	"wfts/internal/model"
 	"wfts/internal/services/wfts/offline/scraper/lruCache"
@@ -171,11 +170,8 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 				return
 			}
 		}
-
-		l := len(links)
-		priority += math.Log(float64(l) + 1)
 		
-		if l == 0 {
+		if len(links) == 0 {
 			log.Debugf("empty links")
 			return
 		}

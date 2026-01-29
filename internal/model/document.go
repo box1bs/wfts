@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 type Document struct {
 	Id 				[32]byte	`json:"id"`
 	URL				string		`json:"url"`
@@ -19,6 +21,13 @@ type Passage struct {
 type WordCountAndPositions struct {
 	Count 		int
 	Positions 	[]Position
+}
+
+type SearchMetrics struct {
+	HandleQuery 	time.Duration
+	FetchAndProcess time.Duration
+	Sort       		time.Duration
+	Total      		time.Duration
 }
 
 type Position struct {

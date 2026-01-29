@@ -2,10 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"wfts/internal/model"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -39,7 +41,7 @@ type viewModel struct {
 	leftVessel      viewport.Model
 
 	getCurrentState func() (int, error)
-	searchFunc 		func(string, int) []*model.Document
+	searchFunc 		func(io.Writer, string, int) ([]*model.Document, *model.SearchMetrics)
 	logLines    	[]string
 	logPlate    	[]string
 	closeIndex 		chan struct{}
@@ -51,7 +53,7 @@ func NewLogChannel(size int) *outputChannel {
 	return &outputChannel{readCh: make(chan []byte, size)}
 }
 
-func InitModel(logChan *outputChannel, borderColor string, currentHandledNum func() (int, error), searchFunc func(string, int) []*model.Document, quitChan chan struct{}) *viewModel {
+func InitModel(logChan *outputChannel, borderColor string, currentHandledNum func() (int, error), searchFunc func(io.Writer, string, int) ([]*model.Document, *model.SearchMetrics), quitChan chan struct{}) *viewModel {
 	ti := textinput.New()
 	ti.Placeholder = "Enter request..."
 	ti.Focus()
@@ -167,7 +169,7 @@ func (vm *viewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text := strings.TrimSpace(vm.searchLabel.Value())
 			if text != "" {
 				vm.logLines = make([]string, 0)
-				out := vm.searchFunc(text, outputSize)
+				out, _ := vm.searchFunc(vm.UILogWriter, text, outputSize)
 				for _, doc := range out {
 					vm.logLines = append(vm.logLines, doc.URL)
 				}

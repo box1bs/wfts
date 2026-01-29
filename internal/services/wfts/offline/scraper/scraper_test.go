@@ -26,7 +26,7 @@ func TestHtmlGetter(t *testing.T) {
     
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            html, err := NewScraper(nil, &configData{}, nil, context.Background()).getHTML(context.Background(), tt.url, NewRateLimiter(100), 3)
+            html, err := NewScraper(nil, &configData{}, nil, context.Background()).getHTML(context.Background(), tt.url, NewRateLimiter(1), 3)
             if err != nil {
                 t.Fatalf("getHTML(%q): %v", tt.url, err)
             }
