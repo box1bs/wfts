@@ -66,9 +66,9 @@ const (
 func NewScraper(mp *sync.Map, cfg *configData, idx indexer, c context.Context) *WebScraper {
 	return &WebScraper{
 		client: &http.Client{
-			Timeout: deadlineTime,
+			Timeout: 2 * deadlineTime,
 			Transport: &http.Transport{
-				IdleConnTimeout:   15 * time.Second,
+				IdleConnTimeout:   deadlineTime,
 				DisableKeepAlives: false,
 				ForceAttemptHTTP2: true,
 			},
@@ -101,16 +101,16 @@ func (ws *WebScraper) Run() {
 			rl := NewRateLimiter(DefaultDelay)
 			ws.rlMap[parsed.Host] = rl
 			ws.rlMu.Unlock()
-			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, 0, log), crawlTime)
+			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
-			ws.ScrapeWithContext(ctx, parsed, 0)
+			ws.ScrapeWithContext(ctx, parsed, 0, 0)
 		}})
 	}
 	ws.pool.Wait()
 	ws.pool.Stop()
 }
 
-func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL, depth int) {
+func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL, seqPriority float64, depth int) {
     if ws.checkContext(ctx) {return}
 
     if depth >= ws.cfg.Depth {
@@ -135,7 +135,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 	hashed := sha256.Sum256([]byte(normalized))
 	load := false
 
-	log := ctx.Value(0).(*model.Logger)
+	log := ctx.Value(model.DefLogKey).(*model.Logger)
 	if log == nil {
 		return
 	}
@@ -201,6 +201,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 		if link.SameDomain {
 			pr *= 2
 		}
+		pr = pr / (float64(depth) + 1) * seqPriority
 
         ws.pool.Submit(model.CrawlNode{Activation: func() {
 			ws.rlMu.Lock()
@@ -211,11 +212,11 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 				ReplaceAttr: model.Replacer,
 			})).With("url", link.Link.String()))
-			c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, 0, log), crawlTime)
+			c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
-			ws.ScrapeWithContext(c, link.Link, depth + 1)
+			ws.ScrapeWithContext(c, link.Link, pr, depth + 1)
 		},
-			Priority: pr / float64(depth + 1),
+			Priority: pr,
 		})
     }
 }

@@ -16,6 +16,9 @@ func NewLogger(log *slog.Logger) *Logger {
 	}
 }
 
+type defaultLoggerKey uint8
+const DefLogKey = defaultLoggerKey(0)
+
 func Replacer(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.TimeKey {
 		return slog.String("time", a.Value.Time().Format("15:04:05 02-01"))

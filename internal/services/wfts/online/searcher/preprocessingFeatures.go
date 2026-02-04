@@ -12,6 +12,8 @@ func calcBM25(idf float64, tf float64, doc *model.Document, avgLen float64) floa
 	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * float64(doc.TokenCount) / avgLen))
 }
 
+const a = 5
+
 func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 	minDencity := math.MaxInt
 
@@ -36,7 +38,7 @@ func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 		for j := 1; j < lenQuery; j++ {
 			arr := positions[j]
 			if len(arr) == 0 {
-				return minDencity //minDencity не успеет измениться до возврата
+				return j - a * (lenQuery - j) // пенальти для докусентов не содержащих все слова запроса, как только попадаем под пустой индекс считаем что дальше нет вхождений
 			}
 			position := bs(j, last)
 			if position >= len(arr) {

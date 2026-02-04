@@ -42,8 +42,9 @@ func (s *SpellChecker) BestReplacement(in *[]string, index int, candidates []str
 	for i, candidate := range candidates {
 		set[candidate] = i
 	}
-	repl := [2]string{}
-	for i := 3; i < 10; i++ {
+	repl := make([]string, 2)
+	wordLen := len(orig)
+	for i := 3; i < wordLen; i++ {
 		part1 := string(orig[:i])
 		if _, ex := set[part1]; !ex {
 			continue
@@ -57,12 +58,7 @@ func (s *SpellChecker) BestReplacement(in *[]string, index int, candidates []str
 			repl[0], repl[1] = part1, part2
 		}
 	}
-	*in = append(*in, "")
-	(*in)[index] = repl[0]
-	for i := index + 1; i < len(*in) - 1; i++ {
-		(*in)[i + 1] = (*in)[i]
-	}
-	(*in)[index + 1] = repl[1]
+	*in = append((*in)[:index], append(repl, (*in)[index + 1:]...)...)
 }
 
 func (s *SpellChecker) noisyChannelScore(word1, word2 []rune, probabilityLog1, probabilityLog2 float64) (float64, int) {

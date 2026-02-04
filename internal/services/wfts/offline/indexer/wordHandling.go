@@ -17,7 +17,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
 
-	logger := ctx.Value(0).(*model.Logger)
+	logger := ctx.Value(model.DefLogKey).(*model.Logger)
 	if logger == nil {
 		return fmt.Errorf("context canceled")
 	}
@@ -63,6 +63,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		bigrams[[2]uint64{idx.minHash.Hash64(allWordTokens[j - 1]), idx.minHash.Hash64(allWordTokens[j])}]++
 	}
 	if err := idx.repository.UpdateBiFreq(bigrams); err != nil {
+		logger.Errorf("error updating bigrams frequency: %v", err)
 		return err
 	}
 	if err := idx.repository.SaveDocument(doc); err != nil {
@@ -87,7 +88,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
-	logger := ctx.Value(0).(*model.Logger)
+	logger := ctx.Value(model.DefLogKey).(*model.Logger)
 	if logger == nil {
 		return nil, nil, fmt.Errorf("context canceled")
 	}
@@ -103,7 +104,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 	isTwoWordCorrection := false
 	lastDoubleCorrPointer := lenStem
 
-	for i := 0; i < lenStem; i++ {
+	for i := range lenStem {
 		documents, err := idx.repository.GetDocumentsByWord(stemmed[i].Value)
 		if err != nil {
 			return nil, nil, err
@@ -152,7 +153,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 			if err != nil {
 				return nil, nil, err
 			}
-			if stem[0].Value == "" { // если заменяется на стоп слово
+			if len(stem) == 0 { // если заменяется на стоп слово
 				wordPos++
 				continue
 			}
@@ -161,7 +162,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 			if err != nil {
 				return nil, nil, err
 			}
-			if tmp > lenWords {
+			if tmp < len(words) {
 				wordPos++
 				lenWords++
 				_, stem, err := idx.stemmer.TokenizeAndStem(words[wordPos])

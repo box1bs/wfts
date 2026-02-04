@@ -49,7 +49,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 	})).With(slog.String("query", query)))
 	metrics := &model.SearchMetrics{}
 	t1p := time.Now()
-	searchContext := context.WithValue(context.Background(), 0, log)
+	searchContext := context.WithValue(context.Background(), model.DefLogKey, log)
 	words, index, err := s.idx.HandleTextQuery(searchContext, query)
 	if err != nil {
 		log.Errorf("handling words error: %v",  err)
@@ -111,13 +111,15 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 		for i := range words {
 			if item, ex := index[i][id]; ex {
 				positions = append(positions, item.Positions)
+			} else {
+				positions = append(positions, []model.Position{})
 			}
 		}
 		r.termProximity = getMinQueryDistInDoc(positions, queryLen)
 		r.logLenWordInURL = boyerMoorAlgorithm(strings.ToLower(doc.URL), words)
 		for i := range words {
 			if item, ex := index[i][id]; ex {
-				for i := 0; i < item.Count && !r.hasWordInHeader; i++ {
+				for i := 0; i < min(item.Count, 500) && !r.hasWordInHeader; i++ {
 					r.hasWordInHeader = item.Positions[i].Type == model.HeaderType
 				}
 			}

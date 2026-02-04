@@ -165,6 +165,8 @@ func (ir *IndexRepository) GetDocumentsByWord(word string) (map[[32]byte]model.W
 const biK = "big:%d:%d"
 
 func (ir *IndexRepository) UpdateBiFreq(biS map[[2]uint64]int) error {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
 	for lr, freq := range biS {
 		if err := ir.DB.Update(func(txn *badger.Txn) error {
 			key := fmt.Appendf(nil, biK, lr[0], lr[1])
@@ -188,6 +190,8 @@ func (ir *IndexRepository) UpdateBiFreq(biS map[[2]uint64]int) error {
 }
 
 func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
 	freq := 0
 	return freq, ir.DB.View(func(txn *badger.Txn) error {
 		it, err := txn.Get(fmt.Appendf(nil, biK, l, r))

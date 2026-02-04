@@ -15,12 +15,10 @@ import (
 	"wfts/configs"
 	"wfts/internal/model"
 	"wfts/internal/repository"
-	"wfts/internal/services/tui"
+	"wfts/internal/services/ui"
 	"wfts/internal/services/wfts/offline/indexer"
 	"wfts/internal/services/wfts/offline/scraper"
 	"wfts/internal/services/wfts/online/searcher"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -119,8 +117,8 @@ func Present(docs []*model.Document) {
 }
 
 func initGUI(cfg *configs.ConfigData, indexF bool) {
-	lc := tui.NewLogChannel(cfg.LogChannelSize)
-	log := model.NewLogger(slog.New(slog.NewJSONHandler(lc, &slog.HandlerOptions{
+	lw := ui.NewLogWriter(1000)
+	log := model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
 	})))
 	ir, err := repository.NewIndexRepository(cfg.IndexPath, log, cfg.ChunkSize)
@@ -143,15 +141,15 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	if !indexF {
 		go func() {
 			mp := new(sync.Map)
-			ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, lc, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+			ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
 			if err := i.Index(mp, ws); err != nil {
 				panic(err)
 			}
 		}()
 	}
 
-	model := tui.InitModel(lc, cfg.TUIBorderColor, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search, c)
-	if _, err := tea.NewProgram(model).Run(); err != nil {
+	manager := ui.New(0.3, 0.4, 0.15, lw, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search)
+	if err := manager.Run(); err != nil {
 		panic(err)
 	}
 }

@@ -32,7 +32,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 	rl := ws.rlMap[cur.Host]
 	ws.rlMu.RUnlock()
 	doc, err := ws.getHTML(ctx, cur.String(), rl, numOfTries)
-	log := ctx.Value(0).(*model.Logger)
+	log := ctx.Value(model.DefLogKey).(*model.Logger)
 	if log == nil {
 		return nil, fmt.Errorf("context canceled")
 	}
@@ -74,7 +74,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	rules := ws.rulesMap[truncatePort(baseURL)]
 	ws.rlMu.RUnlock()
 
-	log := ctx.Value(0).(*model.Logger)
+	log := ctx.Value(model.DefLogKey).(*model.Logger)
 
 	tokenCount := 0
 	const checkContextEvery = 128
