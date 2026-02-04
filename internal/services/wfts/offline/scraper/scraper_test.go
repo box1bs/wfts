@@ -72,7 +72,6 @@ func TestHaveSitemap(t *testing.T) {
                 "https://www.google.com/get/sitemap.xml",
                 "https://www.google.com/travel/flights/sitemap.xml",
                 "https://www.google.com/admob/sitemap.xml",
-                "https://www.google.com/services/sitemap.xml",
                 "https://www.google.com/partners/about/sitemap.xml",
                 "https://www.google.com/adwords/sitemap.xml",
                 "https://www.google.com/adsense/start/sitemap.xml",

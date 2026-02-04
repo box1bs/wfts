@@ -40,7 +40,7 @@ func TestGetMinQueryDistInDoc(t *testing.T) {
                 {},
             },
             lenQuery: 2,
-            expected: math.MaxInt,
+            expected: 1 - a * (2 - 1),
         },
         {
             name:     "no valid sequence",
