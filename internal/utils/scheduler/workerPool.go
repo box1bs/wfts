@@ -1,4 +1,4 @@
-package workerPool
+package scheduler
 
 import (
 	"context"
@@ -11,10 +11,9 @@ import (
 type WorkerPool struct {
 	buf 		chan struct{}
 	quit      	chan struct{}
-	heap		*MinMaxHeap
+	heap		*minMaxHeap
 	wg        	*sync.WaitGroup
 	mu 			*sync.Mutex
-	ctx 		context.Context
 	workers   	int32
 }
 
@@ -25,11 +24,14 @@ func NewWorkerPool(size, queueCapacity int, c context.Context) *WorkerPool {
 		heap: 			NewMinMaxHeap(),
 		wg:        		new(sync.WaitGroup),
 		mu:				new(sync.Mutex),
-		ctx: 			c,
 	}
 	for range size {
 		go wp.worker()
 	}
+	go func() {
+		<-c.Done()
+		close(wp.quit)
+	}()
 	return wp
 }
 
@@ -93,7 +95,6 @@ func (wp *WorkerPool) Wait() {
 }
 
 func (wp *WorkerPool) Stop() {
-	close(wp.quit)
 	close(wp.buf)
 	wp.Wait()
 }

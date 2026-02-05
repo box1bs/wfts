@@ -10,7 +10,7 @@ import (
 	"wfts/internal/model"
 	"wfts/internal/services/wfts/offline/scraper/lruCache"
 	"wfts/internal/utils/parser"
-	"wfts/internal/utils/workerPool"
+	"wfts/internal/utils/scheduler"
 
 	"context"
 	"net/http"
@@ -31,7 +31,7 @@ type WebScraper struct {
 	cfg 		  	*configData
 	rlMu         	*sync.RWMutex
 	lru 			*lrucache.LRUCache
-	pool           	*workerPool.WorkerPool
+	pool           	*scheduler.WorkerPool
 	idx 			indexer
 	globalCtx		context.Context
 	rlMap			map[string]*rateLimiter
@@ -77,7 +77,7 @@ func NewScraper(mp *sync.Map, cfg *configData, idx indexer, c context.Context) *
 		cfg: 			cfg,
 		rlMu:           new(sync.RWMutex),
 		lru: 			lrucache.NewLRUCache(cfg.WorkersNum * 10),
-		pool:           workerPool.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum * 100, c),
+		pool:           scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum * 100, c),
 		idx: 			idx,
 		globalCtx:		c,
 		rlMap: 			make(map[string]*rateLimiter),

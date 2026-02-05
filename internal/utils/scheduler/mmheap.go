@@ -1,4 +1,4 @@
-package workerPool
+package scheduler
 
 import (
 	"math"
@@ -10,27 +10,27 @@ type Item struct {
 	Value    *model.CrawlNode
 }
 
-type MinMaxHeap struct {
+type minMaxHeap struct {
 	data []Item
 }
 
-func NewMinMaxHeap() *MinMaxHeap {
-	return &MinMaxHeap{}
+func NewMinMaxHeap() *minMaxHeap {
+	return &minMaxHeap{}
 }
 
-func (h *MinMaxHeap) Insert(v *model.CrawlNode) {
+func (h *minMaxHeap) Insert(v *model.CrawlNode) {
 	h.data = append(h.data, Item{v.Priority, v})
 	h.bubbleUp(len(h.data) - 1)
 }
 
-func (h *MinMaxHeap) GetMin() (Item, bool) {
+func (h *minMaxHeap) GetMin() (Item, bool) {
 	if len(h.data) == 0 {
 		return Item{}, false
 	}
 	return h.data[0], true
 }
 
-func (h *MinMaxHeap) GetMax() (Item, bool) {
+func (h *minMaxHeap) GetMax() (Item, bool) {
 	n := len(h.data)
 	if n == 0 {
 		return Item{}, false
@@ -44,7 +44,7 @@ func (h *MinMaxHeap) GetMax() (Item, bool) {
 	return h.data[2], true
 }
 
-func (h *MinMaxHeap) DeleteMin() (Item, bool) {
+func (h *minMaxHeap) DeleteMin() (Item, bool) {
 	if len(h.data) == 0 {
 		return Item{}, false
 	}
@@ -58,7 +58,7 @@ func (h *MinMaxHeap) DeleteMin() (Item, bool) {
 	return min, true
 }
 
-func (h *MinMaxHeap) DeleteMax() (Item, bool) {
+func (h *minMaxHeap) DeleteMax() (Item, bool) {
 	n := len(h.data)
 	if n == 0 {
 		return Item{}, false
@@ -91,7 +91,7 @@ func isMinLevel(i int) bool {
 	return level(i) % 2 == 0
 }
 
-func (h *MinMaxHeap) bubbleUp(i int) {
+func (h *minMaxHeap) bubbleUp(i int) {
 	if i == 0 {
 		return
 	}
@@ -114,7 +114,7 @@ func (h *MinMaxHeap) bubbleUp(i int) {
 	}
 }
 
-func (h *MinMaxHeap) bubbleUpMin(i int) {
+func (h *minMaxHeap) bubbleUpMin(i int) {
 	for i >= 3 {
 		gp := (i - 3) / 4
 		if h.data[i].Priority < h.data[gp].Priority {
@@ -126,7 +126,7 @@ func (h *MinMaxHeap) bubbleUpMin(i int) {
 	}
 }
 
-func (h *MinMaxHeap) bubbleUpMax(i int) {
+func (h *minMaxHeap) bubbleUpMax(i int) {
 	for i >= 3 {
 		gp := (i - 3) / 4
 		if h.data[i].Priority > h.data[gp].Priority {
@@ -138,7 +138,7 @@ func (h *MinMaxHeap) bubbleUpMax(i int) {
 	}
 }
 
-func (h *MinMaxHeap) trickleDown(i int) {
+func (h *minMaxHeap) trickleDown(i int) {
 	if isMinLevel(i) {
 		h.trickleDownMin(i)
 	} else {
@@ -146,7 +146,7 @@ func (h *MinMaxHeap) trickleDown(i int) {
 	}
 }
 
-func (h *MinMaxHeap) trickleDownMin(i int) {
+func (h *minMaxHeap) trickleDownMin(i int) {
 	for {
 		m := h.smallestDescendant(i)
 		if m == -1 {
@@ -173,7 +173,7 @@ func (h *MinMaxHeap) trickleDownMin(i int) {
 	}
 }
 
-func (h *MinMaxHeap) trickleDownMax(i int) {
+func (h *minMaxHeap) trickleDownMax(i int) {
 	for {
 		m := h.largestDescendant(i)
 		if m == -1 {
@@ -200,15 +200,15 @@ func (h *MinMaxHeap) trickleDownMax(i int) {
 	}
 }
 
-func (h *MinMaxHeap) smallestDescendant(i int) int {
+func (h *minMaxHeap) smallestDescendant(i int) int {
 	return h.extremeDescendant(i, true)
 }
 
-func (h *MinMaxHeap) largestDescendant(i int) int {
+func (h *minMaxHeap) largestDescendant(i int) int {
 	return h.extremeDescendant(i, false)
 }
 
-func (h *MinMaxHeap) extremeDescendant(i int, min bool) int {
+func (h *minMaxHeap) extremeDescendant(i int, min bool) int {
 	n := len(h.data)
 	best := -1
 
@@ -235,6 +235,6 @@ func isGrandchild(i, j int) bool {
 	return j >= 4 * i + 3
 }
 
-func (h *MinMaxHeap) swap(i, j int) {
+func (h *minMaxHeap) swap(i, j int) {
 	h.data[i], h.data[j] = h.data[j], h.data[i]
 }
