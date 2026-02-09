@@ -78,7 +78,6 @@ func (idx *indexer) Index(vis *sync.Map, ws webScraper) error {
 		idx.minHash = NewHasher(a, b, false) // просто получаем структуру
 	}
 	defer idx.repository.SaveSaltArrays(idx.minHash.a, idx.minHash.b)
-
 	ws.Run()
 	return nil
 }

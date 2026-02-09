@@ -1,7 +1,6 @@
 package scheduler
 
 import (
-	"context"
 	"sync"
 	"sync/atomic"
 
@@ -17,7 +16,7 @@ type WorkerPool struct {
 	workers   	int32
 }
 
-func NewWorkerPool(size, queueCapacity int, c context.Context) *WorkerPool {
+func NewWorkerPool(size, queueCapacity int) *WorkerPool {
 	wp := &WorkerPool{
 		buf: 			make(chan struct{}, queueCapacity),
 		quit:      		make(chan struct{}),
@@ -28,10 +27,6 @@ func NewWorkerPool(size, queueCapacity int, c context.Context) *WorkerPool {
 	for range size {
 		go wp.worker()
 	}
-	go func() {
-		<-c.Done()
-		close(wp.quit)
-	}()
 	return wp
 }
 
@@ -50,11 +45,9 @@ func (wp *WorkerPool) Submit(task model.CrawlNode) {
 		wp.mu.Unlock()
 
 	default:
-		if worstTask, exist := wp.heap.GetMin(); exist {
-			if task.Priority > worstTask.Value.Priority {
-				wp.heap.DeleteMin()
-				wp.heap.Insert(&task)
-			}
+		if worstTask, exist := wp.heap.GetMin(); exist && task.Priority > worstTask.Value.Priority {
+			wp.heap.DeleteMin()
+			wp.heap.Insert(&task)
 		}
 		wp.mu.Unlock()
 	}
@@ -95,6 +88,7 @@ func (wp *WorkerPool) Wait() {
 }
 
 func (wp *WorkerPool) Stop() {
+	close(wp.quit)
 	close(wp.buf)
 	wp.Wait()
 }

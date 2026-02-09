@@ -161,13 +161,7 @@ func (s *EnglishStemmer) stem(word string) string {
         return word
     }
     
-    for suffix, replacement := range s.step1aRules {
-        if strings.HasSuffix(word, suffix) {
-            word = strings.TrimSuffix(word, suffix) + replacement
-            break
-        }
-    }
-    
+    word = s.trimRuleSuffix(word, s.step1aRules, -1)
     word = s.trimRuleSuffix(word, s.step1bRules, 0)
 	word = s.trimRuleSuffix(word, s.step2Rules, 0)
 	word = s.trimRuleSuffix(word, s.step3Rules, 0)
@@ -177,8 +171,7 @@ func (s *EnglishStemmer) stem(word string) string {
 func (s *EnglishStemmer) trimRuleSuffix(word string, rule map[string]string, treshold int) string {
 	for suffix, replacement := range rule {
         if strings.HasSuffix(word, suffix) && s.measure(strings.TrimSuffix(word, suffix)) > treshold {
-            word = strings.TrimSuffix(word, suffix) + replacement
-            return word
+            return strings.TrimSuffix(word, suffix) + replacement
         }
     }
 	return word

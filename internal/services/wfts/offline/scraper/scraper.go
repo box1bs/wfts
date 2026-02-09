@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"io"
 	"log/slog"
+	"math"
 
 	"wfts/internal/model"
 	"wfts/internal/services/wfts/offline/scraper/lruCache"
@@ -77,7 +78,7 @@ func NewScraper(mp *sync.Map, cfg *configData, idx indexer, c context.Context) *
 		cfg: 			cfg,
 		rlMu:           new(sync.RWMutex),
 		lru: 			lrucache.NewLRUCache(cfg.WorkersNum * 10),
-		pool:           scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum * 100, c),
+		pool:           scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum * 100),
 		idx: 			idx,
 		globalCtx:		c,
 		rlMap: 			make(map[string]*rateLimiter),
@@ -141,6 +142,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 	}
 
 	priority := 1.0
+	visPenalty := 0
     
 	if len(links) == 0 && (err == nil || err.Error() != BaseXMLPageError) {
 		if prevDepth, loaded := ws.visited.LoadOrStore(normalized, depth); loaded && prevDepth.(int) <= depth {
@@ -165,10 +167,12 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 					ws.lru.Put(hashed, links)
 				}
 			}
+			visPenalty = prevDepth.(int) - depth
 		} else {
 			if links, err = ws.fetchHTMLcontent(ctx, &priority, currentURL, normalized, depth); err != nil {
 				return
 			}
+			visPenalty = prevDepth.(int) - depth
 		}
 		
 		if len(links) == 0 {
@@ -201,11 +205,11 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 		if link.SameDomain {
 			pr *= 2
 		}
-		pr = pr / (float64(depth) + 1) * seqPriority
+		pr = pr / (float64(depth) + 1) * seqPriority * math.Exp(-0.6 * float64(visPenalty))
 
         ws.pool.Submit(model.CrawlNode{Activation: func() {
 			ws.rlMu.Lock()
-			if ws.rlMap[link.Link.Host] == nil {
+			if _, ex := ws.rlMap[link.Link.Host]; !ex {
 				ws.rlMap[link.Link.Host] = NewRateLimiter(DefaultDelay)
 			}
 			ws.rlMu.Unlock()

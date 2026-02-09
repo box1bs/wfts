@@ -28,6 +28,16 @@ type SearchMetrics struct {
 	FetchAndProcess time.Duration
 	Sort       		time.Duration
 	Total      		time.Duration
+	TotalResults 	int
+}
+
+type DocRanking struct {
+	Tf_Idf 				float64
+	BM25 				float64
+	LogLenWordInURL 	float64
+	TermProximity 		int
+	HasWordInHeader 	bool
+	//any ranking scores
 }
 
 type Position struct {

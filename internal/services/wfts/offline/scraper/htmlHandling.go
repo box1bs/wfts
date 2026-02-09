@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -269,54 +268,57 @@ func (ws *WebScraper) getHTML(ctx context.Context, URL string, rl *rateLimiter, 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests && !ws.checkContext(ctx) {
+		<-time.After(deadlineTime)
+		return ws.getHTML(ctx, URL, rl, try - 1)
+	}
+
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if resp.StatusCode == http.StatusTooManyRequests && !ws.checkContext(ctx) {
-			<-time.After(deadlineTime)
-			return ws.getHTML(ctx, URL, rl, try - 1)
-		} else {
-			return "", fmt.Errorf("non-200 status code: %d", resp.StatusCode)
-		}
+		return "", fmt.Errorf("non-200 status code: %d", resp.StatusCode)
 	}
 
 	if ws.checkContext(ws.globalCtx) {
-		return "", fmt.Errorf("context canceled")
+		return "", context.Canceled
 	}
 
 	ctype := resp.Header.Get("Content-Type")
-	if !strings.Contains(strings.ToLower(ctype), "text/html") {
-		return "", fmt.Errorf("unsupported content type: %s", ctype)
+	if strings.Contains(ctype, "text/html") {
+		return "", fmt.Errorf("content-type: %s", ctype)
 	}
 
-	var builder strings.Builder
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
-	
-	for scanner.Scan() {
-		select {
-		case <-ws.globalCtx.Done():
-			return builder.String(), nil
-		default:
-			builder.WriteString(scanner.Text())
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return "", err
-	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
+    if err != nil {
+        return "", err
+    }
 
-	htmlText := builder.String()
-	if cset := strings.ToLower(resp.Header.Get("charset")); cset == "" || cset != wantedCharset {
-		if match := metaCharsetRe.FindStringSubmatch(htmlText); len(match) > 1 {
-			cset = strings.ToLower(strings.TrimSpace(string(match[1])))
-		}
-		enc, _ := charset.Lookup(cset)
-		if enc == nil {
-			enc = encoding.Nop
-		}
-		utf8Bytes, err := io.ReadAll(enc.NewDecoder().Reader(bytes.NewReader([]byte(htmlText))))
-		if err != nil {
-			return "", err
-		}
-		htmlText = string(utf8Bytes)
+	if ws.checkContext(ctx) {return "", context.Canceled}
+
+	htmlText := string(body)
+	chset := charsetFromResponse(req.Header, htmlText)
+	if chset != wantedCharset {
+		htmlText = convertCharset(chset, body)
 	}
 	return htmlText, nil
+}
+
+func charsetFromResponse(header http.Header, html string) string {
+    if cset := strings.ToLower(header.Get("charset")); cset != "" {
+        return cset
+    }
+    if match := metaCharsetRe.FindStringSubmatch(html); len(match) > 1 {
+        return strings.ToLower(strings.TrimSpace(match[1]))
+    }
+    return wantedCharset
+}
+
+func convertCharset(chset string, data []byte) string {
+	enc, _ := charset.Lookup(chset)
+	if enc == nil {
+		enc = encoding.Nop
+	}
+	utf8Bytes, err := io.ReadAll(enc.NewDecoder().Reader(bytes.NewReader(data)))
+	if err != nil {
+		return string(data)
+	}
+	return string(utf8Bytes)
 }

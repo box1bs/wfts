@@ -44,7 +44,7 @@ func (s *SpellChecker) BestReplacement(in *[]string, index int, candidates []str
 	}
 	repl := make([]string, 2)
 	wordLen := len(orig)
-	for i := 3; i < wordLen; i++ {
+	for i := 3; i < wordLen - 2; i++ { // считаем что длина токена >= 3
 		part1 := string(orig[:i])
 		if _, ex := set[part1]; !ex {
 			continue

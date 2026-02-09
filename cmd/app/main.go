@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"time"
 
@@ -92,27 +91,27 @@ func main() {
 	for {
 		fmt.Print("\n> ")
 		query, _ := reader.ReadString('\n')
-		query = strings.TrimSpace(query)
 		if query == "q" {
 			return
 		}
 		t := time.Now()
-		r, _ := s.Search(out, query, 100)
-		Present(r)
+		topN, topNMetrics, metrics := s.Search(out, query, 100)
+		Present(topN, topNMetrics, metrics)
 		fmt.Printf("--Search time: %v--\n", time.Since(t))
 	}
 }
 
-func Present(docs []*model.Document) {
+func Present(docs []*model.Document, docMetrics []*model.DocRanking, metrics *model.SearchMetrics) {
 	if len(docs) == 0 {
 		fmt.Println("No results found.")
 		return
 	}
 	
 	fmt.Printf("Found %d results:\n", len(docs))
+	fmt.Printf("\ntime costs:\nquery handling: %v\nfetching and processing: %v\nsort: %v\n\ntotal: %v\n\ntotal results: %d\n\n", metrics.HandleQuery, metrics.FetchAndProcess, metrics.Sort, metrics.Total, metrics.TotalResults)
 	for i, doc := range docs {
-		fmt.Printf("%d. URL: %s\n\n", 
-			i+1, doc.URL)
+		fmt.Printf("%d. URL: %s\nmetrics: tf idf: %.6f, bm25: %.6f, log length words in url: %f, term proximity: %d, has word in header: %t\n", 
+			i+1, doc.URL, docMetrics[i].Tf_Idf, docMetrics[i].BM25, docMetrics[i].LogLenWordInURL, docMetrics[i].TermProximity, docMetrics[i].HasWordInHeader)
 	}
 }
 
@@ -130,26 +129,27 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := make(chan struct{}, 1)
-	go func() {
-		<-c
-		cancel()
-		//os.Exit(1)
-	}()
-
+	done := make(chan struct{})
 	i := indexer.NewIndexer(ir, cfg)
 	if !indexF {
 		go func() {
 			mp := new(sync.Map)
 			ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
 			if err := i.Index(mp, ws); err != nil {
-				panic(err)
+				model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+					ReplaceAttr: model.Replacer,
+				}))).Errorf("%v", err)
+				return
 			}
+			done <- struct{}{}
 		}()
 	}
 
 	manager := ui.New(0.3, 0.4, 0.15, lw, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search)
-	if err := manager.Run(); err != nil {
-		panic(err)
+	if err := manager.Run(cancel); err != nil {
+		model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			ReplaceAttr: model.Replacer,
+		}))).Errorf("%v", err)
 	}
+	<-done
 }

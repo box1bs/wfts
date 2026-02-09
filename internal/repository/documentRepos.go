@@ -52,25 +52,18 @@ func (ir *IndexRepository) bytesToDocument(body []byte) (*model.Document, error)
 }
 
 func (ir *IndexRepository) SaveDocument(doc *model.Document) error {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-	
 	docBytes, err := ir.documentToBytes(doc)
 	if err != nil {
 		return err
 	}
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
 	return ir.DB.Update(func(txn *badger.Txn) error {
-		if err := txn.Set(fmt.Appendf(nil, DocumentKeyPrefix, doc.Id[:]), docBytes); err != nil {
-			return err
-		}
-		return nil
+		return txn.Set(fmt.Appendf(nil, DocumentKeyPrefix, doc.Id[:]), docBytes)
 	})
 }
 
 func (ir *IndexRepository) GetDocumentByID(docID [32]byte) (*model.Document, error) {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-
 	var docBytes []byte
 	err := ir.DB.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(fmt.Appendf(nil, DocumentKeyPrefix, docID[:]))
@@ -92,9 +85,6 @@ func (ir *IndexRepository) GetDocumentByID(docID [32]byte) (*model.Document, err
 }
 
 func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-
 	var documents []*model.Document
 	err := ir.DB.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -134,9 +124,6 @@ func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
 }
 
 func (ir *IndexRepository) GetDocumentsCount() (int, error) {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-
 	var count int
 	err := ir.DB.View(func(txn *badger.Txn) error {
 		docPrefix := []byte("doc:")

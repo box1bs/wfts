@@ -34,18 +34,10 @@ func NewSearcher(idx index, repo resitory) *Searcher {
 	}
 }
 
-type requestRanking struct {
-	tf_idf 				float64
-	bm25 				float64
-	logLenWordInURL 	float64
-	termProximity 		int
-	hasWordInHeader 	bool
-	//any ranking scores
-}
-
-func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Document, *model.SearchMetrics) {
+func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Document, []*model.DocRanking, *model.SearchMetrics) {
 	log := model.NewLogger(slog.New(slog.NewJSONHandler(wr, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
+		Level: slog.LevelInfo,
 	})).With(slog.String("query", query)))
 	metrics := &model.SearchMetrics{}
 	t1p := time.Now()
@@ -53,7 +45,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 	words, index, err := s.idx.HandleTextQuery(searchContext, query)
 	if err != nil {
 		log.Errorf("handling words error: %v",  err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	metrics.HandleQuery = time.Since(t1p)
 	
@@ -62,17 +54,17 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 	avgLen, err := s.idx.GetAVGLen()
 	if err != nil {
 		log.Errorf("%v", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	
 	length, err := s.repo.GetDocumentsCount()
 	if err != nil {
 		log.Errorf("%v", err)
-		return nil, nil
+		return nil, nil, nil
 	}
 	
 	t2p := time.Now()
-	rank := make(map[[32]byte]*requestRanking)
+	rank := make(map[[32]byte]*model.DocRanking)
 	result := make([]*model.Document, 0, min(1000, length))
 	resChan := make(chan *model.Document, 100)
 
@@ -91,39 +83,36 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 			}
 			docs[id], err = s.repo.GetDocumentByID(id)
 			if err != nil {
-				return nil, nil
+				return nil, nil, nil
 			}
 			resChan <- docs[id]
 		}
 	}
 	close(resChan)
 
+	paddingMask := []model.Position{}
 	for id, doc := range docs {
-		r := &requestRanking{}
+		r := &model.DocRanking{}
+		positions := make([][]model.Position, queryLen)
 		for i := range words {
 			if item, ex := index[i][id]; ex {
-				tf := float64(item.Count) / float64(docs[id].TokenCount)
-				r.tf_idf += tf * idf[i]
-				r.bm25 += calcBM25(idf[i], tf, doc, avgLen)
-			}
-		}
-		positions := [][]model.Position{}
-		for i := range words {
-			if item, ex := index[i][id]; ex {
-				positions = append(positions, item.Positions)
+				tf := float64(item.Count) / float64(doc.TokenCount)
+				r.Tf_Idf += tf * idf[i]
+				r.BM25 += calcBM25(idf[i], tf, doc, avgLen)
+				positions[i] = item.Positions
 			} else {
-				positions = append(positions, []model.Position{})
+				positions[i] = paddingMask
 			}
 		}
-		r.termProximity = getMinQueryDistInDoc(positions, queryLen)
-		r.logLenWordInURL = boyerMoorAlgorithm(strings.ToLower(doc.URL), words)
+		r.TermProximity = getMinQueryDistInDoc(positions, queryLen)
+		r.LogLenWordInURL = boyerMoorAlgorithm(strings.ToLower(doc.URL), words)
 		for i := range words {
 			if item, ex := index[i][id]; ex {
-				for i := 0; i < min(item.Count, 500) && !r.hasWordInHeader; i++ {
-					r.hasWordInHeader = item.Positions[i].Type == model.HeaderType
+				for i := 0; i < min(item.Count, 500) && !r.HasWordInHeader; i++ {
+					r.HasWordInHeader = item.Positions[i].Type == model.HeaderType
 				}
 			}
-			if r.hasWordInHeader {
+			if r.HasWordInHeader {
 				break
 			}
 		}
@@ -136,30 +125,39 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 	length = len(result)
 	if length == 0 {
 		log.Infof("empty result")
-		return nil, nil
+		return nil, nil, nil
 	}
+	metrics.TotalResults = length
 
 	t3p := time.Now()
 
 	sort.Slice(result, func(i, j int) bool {
-		if rank[result[i].Id].bm25 != rank[result[j].Id].bm25 {
-			return rank[result[i].Id].bm25 > rank[result[j].Id].bm25
+		ir, jr := rank[result[i].Id], rank[result[j].Id]
+		if ir.BM25 != jr.BM25 {
+			return ir.BM25 > jr.BM25
 		}
-		if rank[result[i].Id].tf_idf != rank[result[j].Id].tf_idf {
-			return rank[result[i].Id].tf_idf > rank[result[j].Id].tf_idf
+		if ir.Tf_Idf != jr.Tf_Idf {
+			return ir.Tf_Idf > jr.Tf_Idf
 		}
-		return rank[result[i].Id].termProximity > rank[result[j].Id].termProximity
+		return ir.TermProximity > jr.TermProximity
 	})
 
 	topN := result[:min(length, maxLen)]
 	sort.Slice(topN, func(i, j int) bool {
-		if rank[topN[i].Id].logLenWordInURL != rank[topN[j].Id].logLenWordInURL {
-			return rank[topN[i].Id].logLenWordInURL > rank[topN[i].Id].logLenWordInURL
+		ir, jr := rank[topN[i].Id], rank[topN[j].Id]
+		if ir.LogLenWordInURL != jr.LogLenWordInURL {
+			return ir.LogLenWordInURL > jr.LogLenWordInURL
 		}
-		return rank[topN[i].Id].hasWordInHeader && !rank[topN[j].Id].hasWordInHeader
+		return ir.HasWordInHeader && !jr.HasWordInHeader
 	})
-
 	metrics.Sort = time.Since(t3p)
+
+	length = len(topN)
+	topNMetrics := make([]*model.DocRanking, length)
+	for i := 0; i < length; i++ {
+		topNMetrics[i] = rank[topN[i].Id]
+	}
+
 	metrics.Total = time.Since(t1p)
-	return topN, metrics
+	return topN, topNMetrics, metrics
 }
