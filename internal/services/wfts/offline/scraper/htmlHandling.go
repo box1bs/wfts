@@ -282,7 +282,7 @@ func (ws *WebScraper) getHTML(ctx context.Context, URL string, rl *rateLimiter, 
 	}
 
 	ctype := resp.Header.Get("Content-Type")
-	if strings.Contains(ctype, "text/html") {
+	if !strings.Contains(ctype, "text/html") {
 		return "", fmt.Errorf("content-type: %s", ctype)
 	}
 

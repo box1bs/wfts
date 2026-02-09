@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -44,10 +45,11 @@ func TestHtmlGetter(t *testing.T) {
             if err != nil {
                 t.Fatalf("ReadAll(): %v", err)
             }
+            html = strings.TrimSuffix(html, "\n")
             expected := string(expectedBytes)
             if html != expected {
                 t.Errorf("getHTML(%q) = %q...; want %q...\n", 
-                    tt.url, html[:min(len(html), 100)], expected[:min(len(expected), 100)])
+                    tt.url, html, expected)
             }
         })
     }
