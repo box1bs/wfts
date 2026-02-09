@@ -55,11 +55,7 @@ func NewIndexer(repo repository, config *configs.ConfigData) *indexer {
 	}
 }
 
-type webScraper interface {
-	Run()
-}
-
-func (idx *indexer) Index(vis *sync.Map, ws webScraper) error {
+func (idx *indexer) Index(vis *sync.Map, scrapeFunc func()) error {
 	if err := idx.repository.LoadVisitedUrls(vis); err != nil {
 		return err
 	}
@@ -78,7 +74,7 @@ func (idx *indexer) Index(vis *sync.Map, ws webScraper) error {
 		idx.minHash = NewHasher(a, b, false) // просто получаем структуру
 	}
 	defer idx.repository.SaveSaltArrays(idx.minHash.a, idx.minHash.b)
-	ws.Run()
+	scrapeFunc()
 	return nil
 }
 

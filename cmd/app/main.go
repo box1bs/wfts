@@ -73,7 +73,7 @@ func main() {
 	if !*indexFlag {
 		mp := new(sync.Map)
 		ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
-		if err := i.Index(mp, ws); err != nil {
+		if err := i.Index(mp, ws.Run); err != nil {
 			panic(err)
 		}
 	}
@@ -135,7 +135,7 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 		go func() {
 			mp := new(sync.Map)
 			ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
-			if err := i.Index(mp, ws); err != nil {
+			if err := i.Index(mp, ws.Run); err != nil {
 				model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 					ReplaceAttr: model.Replacer,
 				}))).Errorf("%v", err)
