@@ -167,12 +167,12 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 					ws.lru.Put(hashed, links)
 				}
 			}
-			visPenalty = prevDepth.(int) - depth
+			visPenalty = ws.cfg.Depth - (prevDepth.(int) - depth)
 		} else {
 			if links, err = ws.fetchHTMLcontent(ctx, &priority, currentURL, normalized, depth); err != nil {
 				return
 			}
-			visPenalty = prevDepth.(int) - depth
+			visPenalty = ws.cfg.Depth - (prevDepth.(int) - depth)
 		}
 		
 		if len(links) == 0 {
