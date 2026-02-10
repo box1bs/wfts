@@ -58,7 +58,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 		*pr += math.Log(float64(l) + 1)
 	}
 
-	return links, ws.idx.HandleDocumentWords(ctx, document, pr, passages)
+	return links, ws.HandleDocumentWords(ctx, document, pr, passages)
 }
 
 func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, currentDeep int) (links []*linkToken, pasages []model.Passage) {

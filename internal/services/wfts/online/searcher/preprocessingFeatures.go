@@ -12,7 +12,7 @@ func calcBM25(idf float64, tf float64, doc *model.Document, avgLen float64) floa
 	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * float64(doc.TokenCount) / avgLen))
 }
 
-const a = 5
+const a = 50
 
 func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 	minDencity := math.MaxInt
@@ -38,7 +38,7 @@ func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 		for j := 1; j < lenQuery; j++ {
 			arr := positions[j]
 			if len(arr) == 0 {
-				return j - a * (lenQuery - j) // пенальти для докусентов не содержащих все слова запроса, как только попадаем под пустой индекс считаем что дальше нет вхождений
+				return a * (lenQuery - j) // пенальти для документов не содержащих все слова запроса, как только попадаем под пустой индекс считаем что дальше нет вхождений
 			}
 			position := bs(j, last)
 			if position >= len(arr) {
@@ -65,7 +65,7 @@ func boyerMoorAlgorithm(url string, queryWords []string) float64 {
 		l := len(queryWord)
 		shift := map[rune]int{}
 		for i, r := range word {
-			shift[r] = max(1, l-i-1)
+			shift[r] = max(1, l - i - 1)
 		}
 
 		strp := l - 1

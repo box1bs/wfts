@@ -3,6 +3,7 @@ package scheduler
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"wfts/internal/model"
 )
@@ -30,10 +31,18 @@ func NewWorkerPool(size, queueCapacity int) *WorkerPool {
 	return wp
 }
 
-func (wp *WorkerPool) Submit(task model.CrawlNode) {
+type log interface {
+	Infof(string, ...any)
+}
+
+func (wp *WorkerPool) Submit(task model.CrawlNode, log log) {
 	orig := task.Activation
 	task.Activation = func() {
+		start := time.Now()
 		defer wp.wg.Done()
+		defer func()  {
+			log.Infof("indexing took: %t", time.Since(start))
+		}()
 		orig()
 	}
 	

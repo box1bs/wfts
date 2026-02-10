@@ -139,7 +139,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 		if ir.Tf_Idf != jr.Tf_Idf {
 			return ir.Tf_Idf > jr.Tf_Idf
 		}
-		return ir.TermProximity > jr.TermProximity
+		return ir.TermProximity < jr.TermProximity
 	})
 
 	topN := result[:min(length, maxLen)]

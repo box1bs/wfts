@@ -10,17 +10,17 @@ import (
 )
 
 func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, priority *float64, passages []model.Passage) error {
-	stem := map[string]int{}
-	i := 0
-	pos := map[string][]model.Position{}
-
+	stem := make(map[string]int, 512)
+	pos := make(map[string][]model.Position, 512)
+	
 	idx.mu.Lock()
 	defer idx.mu.Unlock()
-
+	
 	logger := ctx.Value(model.DefLogKey).(*model.Logger)
 	if logger == nil {
 		return fmt.Errorf("context canceled")
 	}
+	i := 0
 	allWordTokens := []string{}
 	for _, passage := range passages {
 		orig, stemmed, err := idx.stemmer.TokenizeAndStem(passage.Text)
@@ -43,8 +43,8 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	}
 	doc.TokenCount = i
 
-	if len(allWordTokens) > 4 {
-		sign := idx.minHash.CreateSignature(allWordTokens)
+	if l := len(allWordTokens); l > 4 {
+		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
 		conds, err := idx.repository.GetSimilarSignatures(sign)
 		if err != nil {
 			return err

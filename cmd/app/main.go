@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"sync"
 	"time"
 
 	"wfts/configs"
@@ -69,11 +68,13 @@ func main() {
 		//os.Exit(1)
 	}()
 
-	i := indexer.NewIndexer(ir, cfg)
+	i, err := indexer.NewIndexer(ir, cfg)
+	if err != nil {
+		panic(err)
+	}
 	if !*indexFlag {
-		mp := new(sync.Map)
-		ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
-		if err := i.Index(mp, ws.Run); err != nil {
+		ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+		if err := ws.Run(); err != nil {
 			panic(err)
 		}
 	}
@@ -130,12 +131,14 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	defer cancel()
 
 	done := make(chan struct{})
-	i := indexer.NewIndexer(ir, cfg)
+	i, err := indexer.NewIndexer(ir, cfg)
+	if err != nil {
+		panic(err)
+	}
 	if !indexF {
 		go func() {
-			mp := new(sync.Map)
-			ws := scraper.NewScraper(mp, scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
-			if err := i.Index(mp, ws.Run); err != nil {
+			ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+			if err := ws.Run(); err != nil {
 				model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 					ReplaceAttr: model.Replacer,
 				}))).Errorf("%v", err)

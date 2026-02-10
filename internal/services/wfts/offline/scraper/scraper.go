@@ -22,18 +22,22 @@ import (
 
 type indexer interface {
     HandleDocumentWords(context.Context, *model.Document, *float64, []model.Passage) error
-	SaveUrlsToBank([32]byte, []byte) error
-	GetUrlsByHash([32]byte) ([]byte, error)
+	IndexUrlsByHash([32]byte, []byte) error
+	GetPageUrlsByHash([32]byte) ([]byte, error)
+	SaveVisitedUrls(*sync.Map) error
+	LoadVisitedUrls(*sync.Map) error
+	SaveHashArrays() error
+	FlushAll()
 }
 
 type WebScraper struct {
+	indexer
 	client         	*http.Client
 	visited        	*sync.Map
 	cfg 		  	*configData
 	rlMu         	*sync.RWMutex
 	lru 			*lrucache.LRUCache
 	pool           	*scheduler.WorkerPool
-	idx 			indexer
 	globalCtx		context.Context
 	rlMap			map[string]*rateLimiter
 	rulesMap		map[string]*parser.RobotsTxt
@@ -64,8 +68,9 @@ const (
 	numOfTries = 3 // если кто то решил поменять это на 0, чтож, удачи
 )
 
-func NewScraper(mp *sync.Map, cfg *configData, idx indexer, c context.Context) *WebScraper {
+func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 	return &WebScraper{
+		indexer: 		idx,
 		client: &http.Client{
 			Timeout: 2 * deadlineTime,
 			Transport: &http.Transport{
@@ -74,20 +79,25 @@ func NewScraper(mp *sync.Map, cfg *configData, idx indexer, c context.Context) *
 				ForceAttemptHTTP2: true,
 			},
 		},
-		visited:        mp,
+		visited:        new(sync.Map),
 		cfg: 			cfg,
 		rlMu:           new(sync.RWMutex),
 		lru: 			lrucache.NewLRUCache(cfg.WorkersNum * 10),
-		pool:           scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum * 100),
-		idx: 			idx,
+		pool:           scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum * 50),
 		globalCtx:		c,
 		rlMap: 			make(map[string]*rateLimiter),
 		rulesMap: 		make(map[string]*parser.RobotsTxt),
 	}
 }
 
-func (ws *WebScraper) Run() {
+func (ws *WebScraper) Run() error {
 	defer ws.putDownLimiters()
+	if err := ws.LoadVisitedUrls(ws.visited); err != nil {
+		return err
+	}
+	defer ws.SaveVisitedUrls(ws.visited)
+	defer ws.SaveHashArrays()
+	defer ws.FlushAll()
 	for _, uri := range ws.cfg.StartURLs {
 		parsed, err := url.Parse(uri)
 		log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
@@ -105,10 +115,11 @@ func (ws *WebScraper) Run() {
 			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
 			ws.ScrapeWithContext(ctx, parsed, 0, 0)
-		}})
+		}}, log)
 	}
 	ws.pool.Wait()
 	ws.pool.Stop()
+	return nil
 }
 
 func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL, seqPriority float64, depth int) {
@@ -152,7 +163,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 			if v := ws.lru.Get(hashed); v != nil {
 				links = v.([]*linkToken)
 			} else {
-				encoded, err := ws.idx.GetUrlsByHash(hashed)
+				encoded, err := ws.GetPageUrlsByHash(hashed)
 				if err != nil {
 					if err.Error() != "Key not found" {
 						log.Errorf("error getting urls, from db: %v", err)
@@ -187,7 +198,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 				return
 			}
 
-			if err := ws.idx.SaveUrlsToBank(hashed, buf.Bytes()); err != nil {
+			if err := ws.IndexUrlsByHash(hashed, buf.Bytes()); err != nil {
 				log.Errorf("error saving urls: %v", err)
 				return
 			}
@@ -221,7 +232,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 			ws.ScrapeWithContext(c, link.Link, pr, depth + 1)
 		},
 			Priority: pr,
-		})
+		}, log)
     }
 }
 
