@@ -85,9 +85,7 @@ func main() {
 	}
 
 	fmt.Printf("Index built with %d documents. Enter search queries (q to exit):\n", count)
-
 	s := searcher.NewSearcher(i, ir)
-
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("\n> ")
@@ -111,7 +109,7 @@ func Present(docs []*model.Document, docMetrics []*model.DocRanking, metrics *mo
 	fmt.Printf("Found %d results:\n", len(docs))
 	fmt.Printf("\ntime costs:\nquery handling: %v\nfetching and processing: %v\nsort: %v\n\ntotal: %v\n\ntotal results: %d\n\n", metrics.HandleQuery, metrics.FetchAndProcess, metrics.Sort, metrics.Total, metrics.TotalResults)
 	for i, doc := range docs {
-		fmt.Printf("%d. URL: %s\nmetrics: tf idf: %.6f, bm25: %.6f, log length words in url: %f, term proximity: %d, has word in header: %t\n", 
+		fmt.Printf("%d. URL: %s\nmetrics: tf idf: %.4f, bm25: %.10f, log length words in url: %.4f, term proximity: %d, has word in header: %t\n", 
 			i+1, doc.URL, docMetrics[i].Tf_Idf, docMetrics[i].BM25, docMetrics[i].LogLenWordInURL, docMetrics[i].TermProximity, docMetrics[i].HasWordInHeader)
 	}
 }
@@ -142,14 +140,16 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 				model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 					ReplaceAttr: model.Replacer,
 				}))).Errorf("%v", err)
-				return
 			}
-			done <- struct{}{}
+			close(done)
 		}()
+	} else {
+		close(done)
 	}
 
 	manager := ui.New(0.3, 0.4, 0.15, lw, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search)
 	if err := manager.Run(cancel); err != nil {
+		cancel()
 		model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 			ReplaceAttr: model.Replacer,
 		}))).Errorf("%v", err)

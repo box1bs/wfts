@@ -76,7 +76,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 		}
 	}()
 	for i := range words {
-		idf[i] = math.Log(float64(length) / float64(len(index[i]) + 1)) + 1
+		idf[i] = math.Log(float64(length) / float64(len(index[i]) + 1))
 		for id := range index[i] {
 			if _, ex := docs[id]; ex {
 				continue
@@ -98,7 +98,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 			if item, ex := index[i][id]; ex {
 				tf := float64(item.Count) / float64(doc.TokenCount)
 				r.Tf_Idf += tf * idf[i]
-				r.BM25 += calcBM25(idf[i], tf, doc, avgLen)
+				r.BM25 += calcBM25(idf[i], avgLen, tf, float64(doc.TokenCount))
 				positions[i] = item.Positions
 			} else {
 				positions[i] = paddingMask
@@ -117,6 +117,8 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 			}
 		}
 		rank[id] = r
+		log.Infof("doc=%s tokens=%d tfidf=%.6f len_norm=%.2f\n", 
+        doc.URL, doc.TokenCount, r.Tf_Idf, float64(doc.TokenCount) / avgLen)
 	}
 	
 	log.Infof("result len: %d", len(result))

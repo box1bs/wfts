@@ -6,10 +6,10 @@ import (
 	"wfts/internal/model"
 )
 
-func calcBM25(idf float64, tf float64, doc *model.Document, avgLen float64) float64 {
+func calcBM25(idf, avgLen, tf, tokens float64) float64 {
 	k1 := 1.2
 	b := 0.75
-	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * float64(doc.TokenCount) / avgLen))
+	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * tokens / avgLen))
 }
 
 const a = 50
@@ -64,7 +64,7 @@ func boyerMoorAlgorithm(url string, queryWords []string) float64 {
 		queryWord := []rune(word)
 		l := len(queryWord)
 		shift := map[rune]int{}
-		for i, r := range word {
+		for i, r := range queryWord {
 			shift[r] = max(1, l - i - 1)
 		}
 
@@ -94,6 +94,5 @@ func boyerMoorAlgorithm(url string, queryWords []string) float64 {
 			}
 		}
 	}
-
 	return math.Log(1 + wordInUrl)
 }

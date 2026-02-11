@@ -20,6 +20,7 @@ const (
 	inputW = 	"in"
 	soutW = 	"out"
 )
+var viewCircle = [3]string{metricsW, inputW, soutW}
 
 type UIManager struct {
 	getCurrentState func() (int, error)
@@ -76,10 +77,19 @@ func (ui *UIManager) Run(cancel context.CancelFunc) error {
 		query := v.Buffer()
 		return ui.search(g, query)
 	})
-	gui.SetKeybinding(soutW, gocui.KeyCtrl2, gocui.ModNone, ui.up)
-	gui.SetKeybinding(soutW, gocui.KeyCtrl3, gocui.ModNone, ui.down)
-	gui.SetKeybinding(logW, gocui.KeyCtrl4, gocui.ModNone, ui.up)
-	gui.SetKeybinding(logW, gocui.KeyCtrl5, gocui.ModNone, ui.down)
+	gui.SetKeybinding("", gocui.KeyArrowUp, gocui.ModNone, ui.up)
+	gui.SetKeybinding("", gocui.KeyArrowDown, gocui.ModNone, ui.down)
+	gui.SetKeybinding("", gocui.KeyTab, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		if curr := g.CurrentView(); curr != nil {
+			for i := range 3 {
+				if viewCircle[i] == curr.Name() {
+					g.SetCurrentView(viewCircle[(i + 1) % 3])
+					break
+				}
+			}
+		}
+		return nil
+	})
 	go func () {
 		t := time.NewTicker(time.Second)
 		for range t.C {
@@ -93,23 +103,17 @@ func (ui *UIManager) Run(cancel context.CancelFunc) error {
 		}
 	}()
 
-	if err := gui.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+	gui.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
 		cancel()
 		return nil
-	}); err != nil {
-		return err
-	}
-	if err := gui.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, quit); err != nil {
-		return err
-	}
-	
+	})
+	gui.SetKeybinding("", gocui.KeyCtrlD, gocui.ModNone, quit)
 	return gui.MainLoop()
 }
 
 func (ui *UIManager) renderLogs(view *gocui.View) {
 	view.Clear()
 	view.SetCursor(0, 0)
-	view.SetOrigin(0, 0)
 	ui.fetchLogs()
 
 	if logSize := len(ui.logLines); logSize > maxLogSize {
@@ -134,9 +138,10 @@ func (ui *UIManager) down(g *gocui.Gui, v *gocui.View) error {
 	_, sy := v.Size()
 
 	curLen := len(v.BufferLines())
-
-	if oy + sy < curLen {
+	if curLen > sy && oy < curLen - sy {
 		v.SetOrigin(0, oy + 1)
+	} else {
+		v.SetOrigin(0, max(0, curLen - sy))
 	}
 	return nil
 }
@@ -181,10 +186,8 @@ func (ui *UIManager) search(g *gocui.Gui, query string) error {
 func (ui *UIManager) renderResults(from []*model.Document, with []*model.DocRanking, to *gocui.View) {
 	to.Clear()
 	to.SetCursor(0, 0)
-	to.SetOrigin(0, 0)
-
 	for i, doc := range from {
-		fmt.Fprintf(to, "%d: tokenCount: %d, tf idf: %.6f, bm25: %.6f, term proximity: %d\nlog length word in header: %f, has word in header: %t\nURL: %s\n", 
+		fmt.Fprintf(to, "%d: tokenCount: %d, tf idf: %.4f, bm25: %.10f, term proximity: %d\nlog length word in header: %.4f, has word in header: %t\nURL: %s\n", 
 		i + 1, doc.TokenCount, with[i].Tf_Idf, with[i].BM25, with[i].TermProximity, with[i].LogLenWordInURL, with[i].HasWordInHeader, doc.URL)
 	}
 }
@@ -197,6 +200,7 @@ func (ui *UIManager) renderMetrics(view *gocui.View) {
 		fmt.Fprintf(view, "ProcessAndFetch: %d ms\n", ui.metrics.FetchAndProcess.Milliseconds())
 		fmt.Fprintf(view, "Sort: %d ms\n", ui.metrics.Sort.Milliseconds())
 		fmt.Fprintf(view, "Total: %d ms\n", ui.metrics.Total.Milliseconds())
+		fmt.Fprintf(view, "TotalFetched: %d\n", ui.metrics.TotalResults)
 	}
 	fmt.Fprintf(view, "Indexed: %d docs", state)
 }
@@ -224,7 +228,6 @@ func (ui *UIManager) layout(g *gocui.Gui) error {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		v.Wrap = true
 		v.Frame = true
 		v.Title = "Metrics"
 		ui.renderMetrics(v)
