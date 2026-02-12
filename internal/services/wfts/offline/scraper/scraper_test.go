@@ -47,9 +47,17 @@ func TestHtmlGetter(t *testing.T) {
             }
             html = strings.TrimSuffix(html, "\n")
             expected := string(expectedBytes)
-            if html != expected {
+            r1, r2 := []rune(html), []rune(expected)
+            if len(r1) != len(r2) {
                 t.Errorf("getHTML(%q) = %q...; want %q...\n", 
                     tt.url, html, expected)
+                return
+            }
+            for i := 0; i < len(r1); i++ {
+                if r1[i] != r2[i] {
+                    t.Errorf("getHTML(%q) = %q...; want %q...\n", 
+                        tt.url, html, expected)
+                }
             }
         })
     }
