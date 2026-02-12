@@ -34,7 +34,7 @@ func (l *Logger) logf(level slog.Level, format string, args ...any) {
 }
 
 func (l *Logger) Infof(format string, args ...any) {
-	l.logf(slog.LevelDebug, format, args...)
+	l.logf(slog.LevelInfo, format, args...)
 }
 
 func (l *Logger) Debugf(format string, args ...any) {

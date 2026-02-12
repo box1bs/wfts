@@ -91,7 +91,7 @@ func (ui *UIManager) Run(cancel context.CancelFunc) error {
 		return nil
 	})
 	go func () {
-		t := time.NewTicker(time.Second)
+		t := time.NewTicker(time.Millisecond * 200)
 		for range t.C {
 			gui.Update(ui.updateLogs)
 		}

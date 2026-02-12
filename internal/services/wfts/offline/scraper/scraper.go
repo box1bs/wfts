@@ -102,6 +102,7 @@ func (ws *WebScraper) Run() error {
 		parsed, err := url.Parse(uri)
 		log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 			ReplaceAttr: model.Replacer,
+			Level: slog.LevelError,
 		})).With("url", uri))
 		if err != nil {
 			log.Errorf("parsing url failed: %v", err)
@@ -115,7 +116,7 @@ func (ws *WebScraper) Run() error {
 			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
 			ws.ScrapeWithContext(ctx, parsed, 0, 0)
-		}}, log)
+		}})
 	}
 	ws.pool.Wait()
 	ws.pool.Stop()
@@ -226,13 +227,14 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 			ws.rlMu.Unlock()
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 				ReplaceAttr: model.Replacer,
+				Level: slog.LevelError,
 			})).With("url", link.Link.String()))
 			c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
 			ws.ScrapeWithContext(c, link.Link, pr, depth + 1)
 		},
 			Priority: pr,
-		}, log)
+		})
     }
 }
 
