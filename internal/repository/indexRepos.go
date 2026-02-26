@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -54,11 +53,7 @@ func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
 			if err != nil {
 				return err
 			}
-			d, err := strconv.Atoi(string(depth))
-			if err != nil {
-				return err
-			}
-            visitedURLs.Store(url, d)
+            visitedURLs.Store(url, decCount(depth))
         }
         return nil
     })
