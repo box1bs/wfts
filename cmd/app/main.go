@@ -133,22 +133,22 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	if err != nil {
 		panic(err)
 	}
+
 	if !indexF {
 		go func() {
 			ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
 			if err := ws.Run(); err != nil {
-				model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+				model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
 					ReplaceAttr: model.Replacer,
-				}))).Errorf("%v", err)
+				}))).Errorf("%v, scraping canceled", err)
 			}
 			close(done)
 		}()
 	} else {
 		close(done)
 	}
-
 	manager := ui.New(0.3, 0.4, 0.15, lw, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search)
-	if err := manager.Run(cancel); err != nil {
+	if err := manager.Run(cancel); err != nil && err.Error() != "quit" {
 		cancel()
 		model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 			ReplaceAttr: model.Replacer,

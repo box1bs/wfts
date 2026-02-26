@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"time"
 	"wfts/internal/model"
 
@@ -53,10 +54,18 @@ func NewLogWriter(cap int) *lw {
 }
 
 func (lw *lw) Write(data []byte) (int, error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic recovered: %v\n", r)
+		}
+	}()
 	select {
 	case lw.logWriter <- data:
 	default:
-		<-lw.logWriter
+		select {
+		case <-lw.logWriter:
+		case <-time.After(time.Second):
+		}
 		select {
 		case lw.logWriter <- data:
 		default:
