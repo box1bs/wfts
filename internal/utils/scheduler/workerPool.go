@@ -1,34 +1,28 @@
-package workerPool
+package scheduler
 
 import (
-	"container/heap"
-	"context"
 	"sync"
 	"sync/atomic"
-
+	
 	"wfts/internal/model"
 )
 
 type WorkerPool struct {
 	buf 		chan struct{}
 	quit      	chan struct{}
-	crawlHeap 	CrawlStream
+	heap		*minMaxHeap
 	wg        	*sync.WaitGroup
 	mu 			*sync.Mutex
-	ctx 		context.Context
 	workers   	int32
 }
 
-func NewWorkerPool(size int, queueCapacity int, c context.Context) *WorkerPool {
-	qheap := make(CrawlStream, 0)
-	heap.Init(&qheap)
+func NewWorkerPool(size, queueCapacity int) *WorkerPool {
 	wp := &WorkerPool{
-		buf: 		make(chan struct{}, queueCapacity),
-		quit:      	make(chan struct{}),
-		crawlHeap:  qheap,
-		wg:        	new(sync.WaitGroup),
-		mu:			new(sync.Mutex),
-		ctx: 		c,
+		buf: 			make(chan struct{}, queueCapacity),
+		quit:      		make(chan struct{}),
+		heap: 			NewMinMaxHeap(),
+		wg:        		new(sync.WaitGroup),
+		mu:				new(sync.Mutex),
 	}
 	for range size {
 		go wp.worker()
@@ -37,23 +31,25 @@ func NewWorkerPool(size int, queueCapacity int, c context.Context) *WorkerPool {
 }
 
 func (wp *WorkerPool) Submit(task model.CrawlNode) {
-	wp.wg.Add(1)
-	//wp.log.Write(logger.NewMessage(logger.WORKER_POOL_LAYER, logger.DEBUG, "Submitting task. Buffer: %d, Workers: %d", len(wp.buf), wp.workers))
-
 	orig := task.Activation
 	task.Activation = func() {
 		defer wp.wg.Done()
 		orig()
 	}
-
+	
 	wp.mu.Lock()
-	select{
+	select {
 	case wp.buf <- struct{}{}:
-		wp.crawlHeap.Push(task)
+		wp.wg.Add(1)
+		wp.heap.Insert(&task)
 		wp.mu.Unlock()
+
 	default:
+		if worstTask, exist := wp.heap.GetMin(); exist && task.Priority > worstTask.Value.Priority {
+			wp.heap.DeleteMin()
+			wp.heap.Insert(&task)
+		}
 		wp.mu.Unlock()
-		task.Activation()
 	}
 }
 
@@ -67,12 +63,20 @@ func (wp *WorkerPool) worker() {
 				return
 			}
 			wp.mu.Lock()
-			if f := wp.crawlHeap.Pop().(model.CrawlNode); f.Activation != nil {
+			task, exist := wp.heap.GetMax()
+			if exist {
+				wp.heap.DeleteMax()
 				wp.mu.Unlock()
-				f.Activation()
+				task.Value.Activation()
 				continue
 			}
 			wp.mu.Unlock()
+
+			select {
+			case wp.buf <- struct{}{}:
+			default:
+			}
+
 		case <-wp.quit:
 			return
 		}

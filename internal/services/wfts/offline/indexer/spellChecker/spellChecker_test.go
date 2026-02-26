@@ -33,6 +33,16 @@ func TestBestReplacement(t *testing.T) {
             expectedLen:   4,
             expectedWords: []int{1, 2},
         },
+        {
+            name:          "splitting replacement with stop word",
+            query:         []string{"test", "somerequest", "replacement"},
+            replacements:  []string{"some", "something", "request"},
+            scores:        [][2]float64{{0.99, 0.4}, {0.9, 0}, {0.55, 0.6}},
+			expectedIndex: []int{0, 2},
+            checkLen:      true,
+            expectedLen:   4,
+            expectedWords: []int{1, 2},
+        },
     }
     
 	sc := NewSpellChecker(3, 3)
@@ -50,13 +60,13 @@ func TestBestReplacement(t *testing.T) {
                 }
                 if testQuery[tt.expectedWords[0]] != tt.replacements[tt.expectedIndex[0]] && 
                    testQuery[tt.expectedWords[1]] != tt.replacements[tt.expectedIndex[1]] {
-                    t.Errorf("invalid replacement value %s : %s, instead if %s : %s", 
+                    t.Errorf("invalid replacement value %s : %s, instead of %s : %s", 
                         testQuery[tt.expectedWords[0]], testQuery[tt.expectedWords[1]], 
                         tt.replacements[tt.expectedIndex[0]], tt.replacements[tt.expectedIndex[1]])
                 }
             } else {
                 if testQuery[tt.expectedWords[0]] != tt.replacements[tt.expectedIndex[0]] {
-                    t.Errorf("invalid replacement value %s, instead if %s", testQuery[tt.expectedWords[0]], tt.replacements[tt.expectedIndex[0]])
+                    t.Errorf("invalid replacement value %s, instead of %s", testQuery[tt.expectedWords[0]], tt.replacements[tt.expectedIndex[0]])
                 }
             }
         })

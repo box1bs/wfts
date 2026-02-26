@@ -80,20 +80,6 @@ func (r *RobotsTxt) IsAllowed(userAgent, url string) bool {
         return true
     }
 
-    if rule, ok := r.Rules["*"]; ok {
-        for _, disallow := range rule.Disallow {
-            if strings.HasPrefix(url, disallow) {
-                return false
-            }
-        }
-        for _, allow := range rule.Allow {
-            if strings.HasPrefix(url, allow) {
-                return true
-            }
-        }
-        return true
-    }
-
     return true
 }
 

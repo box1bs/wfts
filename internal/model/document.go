@@ -1,5 +1,7 @@
 package model
 
+import "time"
+
 type Document struct {
 	Id 				[32]byte	`json:"id"`
 	URL				string		`json:"url"`
@@ -19,6 +21,23 @@ type Passage struct {
 type WordCountAndPositions struct {
 	Count 		int
 	Positions 	[]Position
+}
+
+type SearchMetrics struct {
+	HandleQuery 	time.Duration
+	FetchAndProcess time.Duration
+	Sort       		time.Duration
+	Total      		time.Duration
+	TotalResults 	int
+}
+
+type DocRanking struct {
+	Tf_Idf 				float64
+	BM25 				float64
+	LogLenWordInURL 	float64
+	TermProximity 		int
+	HasWordInHeader 	bool
+	//any ranking scores
 }
 
 type Position struct {
@@ -48,6 +67,5 @@ func NewTypeTextObj[T Passage | Position](t byte, text string, i int) T {
 
 type CrawlNode struct {
 	Activation 	func()
-	Depth 		int
-	SameDomain 	bool
+	Priority 	float64
 }

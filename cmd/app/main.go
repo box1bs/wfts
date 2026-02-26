@@ -5,19 +5,18 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"time"
 
 	"wfts/configs"
 	"wfts/internal/model"
 	"wfts/internal/repository"
-	"wfts/internal/services/tui"
+	"wfts/internal/services/ui"
 	"wfts/internal/services/wfts/offline/indexer"
+	"wfts/internal/services/wfts/offline/scraper"
 	"wfts/internal/services/wfts/online/searcher"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -47,7 +46,11 @@ func main() {
 	}
 	defer out.Close()
 
-	ir, err := repository.NewIndexRepository(cfg.IndexPath, out, cfg.ChunkSize)
+	log := model.NewLogger(slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{
+		ReplaceAttr: model.Replacer,
+	})))
+
+	ir, err := repository.NewIndexRepository(cfg.IndexPath, log, cfg.ChunkSize)
 	if err != nil {
 		panic(err)
 	}
@@ -65,9 +68,13 @@ func main() {
 		//os.Exit(1)
 	}()
 
-	i := indexer.NewIndexer(ir, out, cfg)
+	i, err := indexer.NewIndexer(ir, cfg)
+	if err != nil {
+		panic(err)
+	}
 	if !*indexFlag {
-		if err := i.Index(cfg, ctx); err != nil {
+		ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+		if err := ws.Run(); err != nil {
 			panic(err)
 		}
 	}
@@ -78,39 +85,41 @@ func main() {
 	}
 
 	fmt.Printf("Index built with %d documents. Enter search queries (q to exit):\n", count)
-
-	s := searcher.NewSearcher(out, i, ir)
-
+	s := searcher.NewSearcher(i, ir)
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("\n> ")
 		query, _ := reader.ReadString('\n')
-		query = strings.TrimSpace(query)
 		if query == "q" {
 			return
 		}
 		t := time.Now()
-		Present(s.Search(query, 100))
+		topN, topNMetrics, metrics := s.Search(out, query, 100)
+		Present(topN, topNMetrics, metrics)
 		fmt.Printf("--Search time: %v--\n", time.Since(t))
 	}
 }
 
-func Present(docs []*model.Document) {
+func Present(docs []*model.Document, docMetrics []*model.DocRanking, metrics *model.SearchMetrics) {
 	if len(docs) == 0 {
 		fmt.Println("No results found.")
 		return
 	}
 	
 	fmt.Printf("Found %d results:\n", len(docs))
+	fmt.Printf("\ntime costs:\nquery handling: %v\nfetching and processing: %v\nsort: %v\n\ntotal: %v\n\ntotal results: %d\n\n", metrics.HandleQuery, metrics.FetchAndProcess, metrics.Sort, metrics.Total, metrics.TotalResults)
 	for i, doc := range docs {
-		fmt.Printf("%d. URL: %s\n\n", 
-			i+1, doc.URL)
+		fmt.Printf("%d. URL: %s\nmetrics: tf idf: %.4f, bm25: %.10f, log length words in url: %.4f, term proximity: %d, has word in header: %t\n", 
+			i+1, doc.URL, docMetrics[i].Tf_Idf, docMetrics[i].BM25, docMetrics[i].LogLenWordInURL, docMetrics[i].TermProximity, docMetrics[i].HasWordInHeader)
 	}
 }
 
 func initGUI(cfg *configs.ConfigData, indexF bool) {
-	lc := tui.NewLogChannel(cfg.LogChannelSize)
-	ir, err := repository.NewIndexRepository(cfg.IndexPath, lc, cfg.ChunkSize)
+	lw := ui.NewLogWriter(1000)
+	log := model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
+		ReplaceAttr: model.Replacer,
+	})))
+	ir, err := repository.NewIndexRepository(cfg.IndexPath, log, cfg.ChunkSize)
 	if err != nil {
 		panic(err)
 	}
@@ -119,24 +128,31 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	c := make(chan struct{}, 1)
-	go func() {
-		<-c
-		cancel()
-		//os.Exit(1)
-	}()
-
-	i := indexer.NewIndexer(ir, lc, cfg)
-	if !indexF {
-		go func() {
-			if err := i.Index(cfg, ctx); err != nil {
-				panic(err)
-			}
-		}()
-	}
-
-	model := tui.InitModel(lc, cfg.TUIBorderColor, ir.GetDocumentsCount, searcher.NewSearcher(lc, i, ir).Search, c)
-	if _, err := tea.NewProgram(model).Run(); err != nil {
+	done := make(chan struct{})
+	i, err := indexer.NewIndexer(ir, cfg)
+	if err != nil {
 		panic(err)
 	}
+	if !indexF {
+		go func() {
+			ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+			if err := ws.Run(); err != nil {
+				model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+					ReplaceAttr: model.Replacer,
+				}))).Errorf("%v", err)
+			}
+			close(done)
+		}()
+	} else {
+		close(done)
+	}
+
+	manager := ui.New(0.3, 0.4, 0.15, lw, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search)
+	if err := manager.Run(cancel); err != nil {
+		cancel()
+		model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			ReplaceAttr: model.Replacer,
+		}))).Errorf("%v", err)
+	}
+	<-done
 }

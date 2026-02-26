@@ -4,12 +4,9 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
-	"io"
-	"log/slog"
-	"strconv"
+	"fmt"
 	"strings"
 	"sync"
-	"fmt"
 
 	"wfts/internal/model"
 
@@ -18,7 +15,7 @@ import (
 
 type IndexRepository struct {
 	DB 				*badger.DB
-	log 			*slog.Logger
+	log 			*model.Logger
 	wg 				*sync.WaitGroup
 	mu 				*sync.Mutex
 	nGramIndexer	*wordChunkData
@@ -26,13 +23,12 @@ type IndexRepository struct {
 	chunkSize 		int
 }
 
-func NewIndexRepository(path string, wr io.Writer, chunkSize int) (*IndexRepository, error) {
+func NewIndexRepository(path string, log *model.Logger, chunkSize int) (*IndexRepository, error) {
 	db, err := badger.Open(badger.DefaultOptions(path).WithLoggingLevel(badger.WARNING))
-	db.CacheMaxCost(badger.BlockCache, 64 << 20)
 	if err != nil {
 		return nil, err
 	}
-	log := slog.New(slog.NewTextHandler(wr, &slog.HandlerOptions{}))
+	db.CacheMaxCost(badger.BlockCache, 128 << 20)
 	ir := &IndexRepository{
 		DB: db,
 		log: log,
@@ -46,13 +42,10 @@ func NewIndexRepository(path string, wr io.Writer, chunkSize int) (*IndexReposit
 }
 
 func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
-    opts := badger.DefaultIteratorOptions
-    opts.Prefix = []byte("visited:")
-
     return ir.DB.View(func(txn *badger.Txn) error {
-        it := txn.NewIterator(opts)
+        it := txn.NewIterator(badger.DefaultIteratorOptions)
         defer it.Close()
-        for it.Rewind(); it.Valid(); it.Next() {
+        for it.Seek([]byte("visited:")); it.ValidForPrefix([]byte("visited:")); it.Next() {
             item := it.Item()
             key := string(item.Key())
             url := strings.TrimPrefix(key, "visited:")
@@ -60,32 +53,31 @@ func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
 			if err != nil {
 				return err
 			}
-			d, err := strconv.Atoi(string(depth))
-			if err != nil {
-				return err
-			}
-            visitedURLs.Store(url, d)
+            visitedURLs.Store(url, decCount(depth))
         }
         return nil
     })
 }
 
 func (ir *IndexRepository) SaveVisitedUrls(visitedURLs *sync.Map) error {
+	urls := []struct{url string; depth int}{}
 	visitedURLs.Range(func(key, value any) bool {
 		if url, ok := key.(string); ok {
-			ir.DB.Update(func(txn *badger.Txn) error {
-				return txn.Set([]byte("visited:" + url), fmt.Append(nil, value.(int)))
-			})
+			urls = append(urls, struct{url string; depth int}{url, value.(int)})
 		}
 		return true
 	})
+	for _, u := range urls {
+		if err := ir.DB.Update(func(txn *badger.Txn) error {
+			return txn.Set([]byte("visited:"+u.url), encCount(u.depth))
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func (ir *IndexRepository) IndexDocumentWords(docID [32]byte, sequence map[string]int, pos map[string][]model.Position) error {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-
 	type wordEntry struct {
 		word string
 		freq int
@@ -168,6 +160,8 @@ func (ir *IndexRepository) GetDocumentsByWord(word string) (map[[32]byte]model.W
 const biK = "big:%d:%d"
 
 func (ir *IndexRepository) UpdateBiFreq(biS map[[2]uint64]int) error {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
 	for lr, freq := range biS {
 		if err := ir.DB.Update(func(txn *badger.Txn) error {
 			key := fmt.Appendf(nil, biK, lr[0], lr[1])
@@ -191,16 +185,18 @@ func (ir *IndexRepository) UpdateBiFreq(biS map[[2]uint64]int) error {
 }
 
 func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
 	freq := 0
 	return freq, ir.DB.View(func(txn *badger.Txn) error {
-		it, err := txn.Get(fmt.Appendf(nil, biK, l, r))
+		item, err := txn.Get(fmt.Appendf(nil, biK, l, r))
 		if err != nil {
 			if err == badger.ErrKeyNotFound {
 				return nil
 			}
 			return err
 		}
-		val, err := it.ValueCopy(nil)
+		val, err := item.ValueCopy(nil)
 		if err != nil {
 			return err
 		}

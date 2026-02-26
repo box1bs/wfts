@@ -37,8 +37,9 @@ func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
 				chId := ir.nGramIndexer.counts[ng]
 				toFlush := make([]string, len(buf)) // чтоб не обнулялось
 				copy(toFlush, buf)
-				ir.nGramIndexer.buffer[ng] = buf[:0]
+				delete(ir.nGramIndexer.buffer, ng)
 				ir.mu.Unlock()
+
 				if err := ir.flushChunk(chId, ngKey, ng, toFlush); err != nil {
 					return err
 				}
@@ -62,9 +63,10 @@ func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
 			chId := ir.shingleIndexer.counts[lshKey]
 			toFlush := make([][128]uint64, len(buf)) // чтоб не обнулялся
 			copy(toFlush, buf)
-			ir.shingleIndexer.buffer[lshKey] = buf[:0]
+			delete(ir.shingleIndexer.buffer, lshKey)
 			ir.mu.Unlock()
 			strs := [4]string{}
+
 			for i := range 4 {
 				strs[i] = strconv.FormatUint(lshKey[i], 10)
 			}
@@ -80,9 +82,6 @@ func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
 }
 
 func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error) {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-
 	result := []string{}
 	alreadyInc := map[string]struct{}{}
 
@@ -206,13 +205,15 @@ func (ir *IndexRepository) flushChunk(id int, k, data string, buffer any) error 
 	if err := ir.DB.Update(func(txn *badger.Txn) error {
 		return txn.Set(key, val)
 	}); err != nil {
-		ir.log.Error(fmt.Sprintf("error flushing chunk %s, with error %v", data, err))
+		ir.log.Errorf("error flushing chunk %v", err)
 		return err
 	}
 	return nil
 }
 
 func (ir *IndexRepository) FlushAll() {
+	ir.mu.Lock()
+	defer ir.mu.Unlock()
 	for ng, buf := range ir.nGramIndexer.buffer {
 		if len(buf) == 0 {
 			continue
@@ -227,7 +228,7 @@ func (ir *IndexRepository) FlushAll() {
 		ir.shingleIndexer.counts[sh]++
 		strs := [4]string{}
 		for i := range 4 {
-			strs[i] = strconv.Itoa(int(sh[i]))
+			strs[i] = strconv.FormatUint(sh[i], 10)
 		}
 		ir.flushChunk(ir.shingleIndexer.counts[sh], shingleKey, strings.Join(strs[:], "."), buf)
 	}
@@ -239,6 +240,8 @@ func (ir * IndexRepository) UpdateChunkingCounts() error {
 	if err := ir.DB.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
+		ir.mu.Lock()
+		defer ir.mu.Unlock()
 		for it.Seek(prefixN); it.ValidForPrefix(prefixN); it.Next() {
 			item := it.Item()
 			ngramButch := strings.Split(strings.TrimPrefix(string(item.Key()), string(prefixN)), ":")
@@ -259,6 +262,8 @@ func (ir * IndexRepository) UpdateChunkingCounts() error {
 	return ir.DB.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
+		ir.mu.Lock()
+		defer ir.mu.Unlock()
 		for it.Seek(prefixS); it.ValidForPrefix(prefixS); it.Next() {
 			item := it.Item()
 			shingleButch := strings.Split(strings.TrimPrefix(string(item.Key()), string(prefixS)), ":")

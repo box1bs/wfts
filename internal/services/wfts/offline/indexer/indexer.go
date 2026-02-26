@@ -1,18 +1,13 @@
 package indexer
 
 import (
-	"context"
 	"fmt"
-	"io"
-	"log/slog"
 	"sync"
 
 	"wfts/configs"
 	"wfts/internal/model"
 	"wfts/internal/services/wfts/offline/indexer/spellChecker"
 	"wfts/internal/services/wfts/offline/indexer/textHandling"
-	"wfts/internal/services/wfts/offline/scraper"
-	"wfts/internal/utils/workerPool"
 )
 
 type repository interface {
@@ -44,57 +39,37 @@ type repository interface {
 }
 
 type indexer struct {
-	spider 		*scraper.WebScraper
+	repository
 	stemmer 	*textHandling.EnglishStemmer
 	sc 			*spellChecker.SpellChecker
-	logger 		*slog.Logger
 	minHash 	*minHash
 	mu 			*sync.RWMutex
-	repository 	repository
 }
 
-func NewIndexer(repo repository, wr io.Writer, config *configs.ConfigData) *indexer {
-	log := slog.New(slog.NewTextHandler(wr, &slog.HandlerOptions{}))
-	return &indexer{
+func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
+	idx := &indexer{
 		stemmer:   	textHandling.NewEnglishStemmer(),
+		sc: 		spellChecker.NewSpellChecker(config.MaxTypo, config.NGramCount),
 		mu: 		new(sync.RWMutex),
 		repository: repo,
-		sc: 		spellChecker.NewSpellChecker(config.MaxTypo, config.NGramCount),
-		logger:    	log,
 	}
-}
-
-func (idx *indexer) Index(config *configs.ConfigData, global context.Context) error {
-	vis := &sync.Map{}
-	if err := idx.repository.LoadVisitedUrls(vis); err != nil {
-		return err
-	}
-	defer idx.repository.SaveVisitedUrls(vis)
-	defer idx.repository.FlushAll()
-	if a, b, err := idx.repository.UploadSaltArrays(); err != nil && err.Error() != "Key not found" {
-		return err
+	if a, b, err := idx.UploadSaltArrays(); err != nil && err.Error() != "Key not found" {
+		return nil, err
 	} else if err != nil && err.Error() == "Key not found" {
-		if c, err := idx.repository.GetDocumentsCount(); err != nil {
-			return err
+		if c, err := idx.GetDocumentsCount(); err != nil {
+			return nil, err
 		} else if c != 0 {
-			return fmt.Errorf("index isn't empty, but salt arrays is")
+			return nil, fmt.Errorf("index isn't empty, but salt arrays is")
 		}
 		idx.minHash = NewHasher(a, b, true) // пересоздаем
 	} else {
 		idx.minHash = NewHasher(a, b, false) // просто получаем структуру
 	}
-	defer idx.repository.SaveSaltArrays(idx.minHash.a, idx.minHash.b)
+	return idx, nil
+}
 
-	idx.spider = scraper.NewScraper(vis, &scraper.ConfigData{
-		StartURLs:     	config.BaseURLs,
-		CacheCap: 		config.WorkersCount * 10,	
-		Depth:       	config.MaxDepth,
-		OnlySameDomain: config.OnlySameDomain,
-	}, idx.logger,
-		workerPool.NewWorkerPool(config.WorkersCount, config.TasksCount, global),
-		idx, global)
-	idx.spider.Run()
-	return nil
+func (idx *indexer) SaveHashArrays() error {
+	return idx.SaveSaltArrays(idx.minHash.a, idx.minHash.b)
 }
 
 func (idx *indexer) GetAVGLen() (float64, error) {
@@ -102,7 +77,7 @@ func (idx *indexer) GetAVGLen() (float64, error) {
 	defer idx.mu.RUnlock()
 
 	var tokens int
-	docs, err := idx.repository.GetAllDocuments()
+	docs, err := idx.GetAllDocuments()
 	if err != nil {
 		return 0, err
 	}
@@ -112,12 +87,4 @@ func (idx *indexer) GetAVGLen() (float64, error) {
 	}
 
 	return float64(tokens) / (float64(len(docs)) + 1), nil
-}
-
-func (idx *indexer) SaveUrlsToBank(key [32]byte, data []byte) error {
-	return idx.repository.IndexUrlsByHash(key, data)
-}
-
-func (idx *indexer) GetUrlsByHash(key [32]byte) ([]byte, error) {
-	return idx.repository.GetPageUrlsByHash(key)
 }

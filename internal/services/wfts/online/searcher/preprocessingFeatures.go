@@ -6,11 +6,13 @@ import (
 	"wfts/internal/model"
 )
 
-func calcBM25(idf float64, tf float64, doc *model.Document, avgLen float64) float64 {
+func calcBM25(idf, avgLen, tf, tokens float64) float64 {
 	k1 := 1.2
 	b := 0.75
-	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * float64(doc.TokenCount) / avgLen))
+	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * tokens / avgLen))
 }
+
+const a = 50
 
 func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 	minDencity := math.MaxInt
@@ -36,7 +38,7 @@ func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 		for j := 1; j < lenQuery; j++ {
 			arr := positions[j]
 			if len(arr) == 0 {
-				return minDencity //minDencity не успеет измениться до возврата
+				return a * (lenQuery - j) // пенальти для документов не содержащих все слова запроса, как только попадаем под пустой индекс считаем что дальше нет вхождений
 			}
 			position := bs(j, last)
 			if position >= len(arr) {
@@ -54,7 +56,7 @@ func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 	return minDencity
 }
 
-func boyerMoorAlgorithm(url string, queryWords []string) (bool, float64) {
+func boyerMoorAlgorithm(url string, queryWords []string) float64 {
 	wordInUrl := 0.0
 	urlRunes := []rune(url)
 	ul := len(urlRunes)
@@ -62,8 +64,8 @@ func boyerMoorAlgorithm(url string, queryWords []string) (bool, float64) {
 		queryWord := []rune(word)
 		l := len(queryWord)
 		shift := map[rune]int{}
-		for i, r := range word {
-			shift[r] = max(1, l-i-1)
+		for i, r := range queryWord {
+			shift[r] = max(1, l - i - 1)
 		}
 
 		strp := l - 1
@@ -92,6 +94,5 @@ func boyerMoorAlgorithm(url string, queryWords []string) (bool, float64) {
 			}
 		}
 	}
-
-	return wordInUrl > 0.0, math.Log(1 + wordInUrl)
+	return math.Log(1 + wordInUrl)
 }

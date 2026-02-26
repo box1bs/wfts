@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"wfts/internal/model"
 	"wfts/internal/utils/parser"
+
 	"golang.org/x/net/html/charset"
 )
 
@@ -34,7 +37,7 @@ func (ws *WebScraper) fetchPageRulesAndOffers(ctx context.Context, cur *url.URL)
 		robotsTXT = nil
 	}
 
-	links, err := ws.prepareSitemapLinks(cur)
+	links, err := ws.prepareSitemapLinks(ctx, cur)
 	return links, robotsTXT, err
 }
 
@@ -113,15 +116,19 @@ func getSitemapURLs(URL string, cli *http.Client) ([]string, error) {
 	return decodeSitemap(bytes.NewReader(bytes.TrimPrefix(body, []byte("\xef\xbb\xbf"))))
 }
 
-func (ws *WebScraper) prepareSitemapLinks(current *url.URL) ([]*linkToken, error) {
+func (ws *WebScraper) prepareSitemapLinks(ctx context.Context, current *url.URL) ([]*linkToken, error) {
 	links := make([]*linkToken, 0)
 	var urls []string
 	var err error
+	log := ctx.Value(model.DefLogKey).(*model.Logger)
+	if log == nil {
+		return nil, fmt.Errorf("context canceled")
+	}
 	if urls, err = ws.haveSitemap(current); err == nil && len(urls) > 0 {
 		for _, link := range urls {
 			parsed, err := url.Parse(link)
 			if err != nil {
-				ws.log.Error("error parsing link: " + err.Error())
+				log.Errorf("error parsing link %s: %v", link, err)
 				continue
 			}
 			same := isSameOrigin(parsed, current)

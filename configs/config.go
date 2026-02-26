@@ -14,7 +14,6 @@ type ConfigData struct {
 	LogChannelSize 			int      	`json:"log_channel_size" validate:"min=1000,max=50000"`
 	TickerTimeMilliseconds  int  		`json:"ticker_time_milliseconds" validate:"min=500,max=10000"`
 	WorkersCount   			int      	`json:"worker_count" validate:"min=50,max=2000"`
-	TasksCount     			int      	`json:"task_count" validate:"min=100,max=10000"`
 	MaxDepth       			int      	`json:"max_depth_crawl" validate:"min=1,max=10"`
 	NGramCount    			int      	`json:"ngram_count" validate:"min=2,max=5"`
 	MaxTypo	  				int      	`json:"max_typo" validate:"min=1,max=4"`

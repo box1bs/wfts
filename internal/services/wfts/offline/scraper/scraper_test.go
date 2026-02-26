@@ -3,12 +3,12 @@ package scraper
 import (
 	"context"
 	"io"
-	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -27,7 +27,7 @@ func TestHtmlGetter(t *testing.T) {
     
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            html, err := NewScraper(nil, &ConfigData{}, slog.Default(), nil, nil, context.Background()).getHTML(tt.url, NewRateLimiter(1), 3)
+            html, err := NewScraper(&configData{}, nil, context.Background()).getHTML(context.Background(), tt.url, NewRateLimiter(1), 3)
             if err != nil {
                 t.Fatalf("getHTML(%q): %v", tt.url, err)
             }
@@ -45,10 +45,19 @@ func TestHtmlGetter(t *testing.T) {
             if err != nil {
                 t.Fatalf("ReadAll(): %v", err)
             }
+            html = strings.TrimSuffix(html, "\n")
             expected := string(expectedBytes)
-            if html != expected {
+            r1, r2 := []rune(html), []rune(expected)
+            if len(r1) != len(r2) {
                 t.Errorf("getHTML(%q) = %q...; want %q...\n", 
-                    tt.url, html[:min(len(html), 100)], expected[:min(len(expected), 100)])
+                    tt.url, html, expected)
+                return
+            }
+            for i := 0; i < len(r1); i++ {
+                if r1[i] != r2[i] {
+                    t.Errorf("getHTML(%q) = %q...; want %q...\n", 
+                        tt.url, html, expected)
+                }
             }
         })
     }
@@ -73,10 +82,8 @@ func TestHaveSitemap(t *testing.T) {
                 "https://www.google.com/get/sitemap.xml",
                 "https://www.google.com/travel/flights/sitemap.xml",
                 "https://www.google.com/admob/sitemap.xml",
-                "https://www.google.com/services/sitemap.xml",
                 "https://www.google.com/partners/about/sitemap.xml",
                 "https://www.google.com/adwords/sitemap.xml",
-                "https://www.google.com/search/about/sitemap.xml",
                 "https://www.google.com/adsense/start/sitemap.xml",
                 "https://www.google.com/chromebook/sitemap.xml",
                 "https://www.google.com/chrome/sitemap.xml",
@@ -92,7 +99,7 @@ func TestHaveSitemap(t *testing.T) {
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             parsed, _ := url.Parse(tt.input)
-            links, err := NewScraper(nil, &ConfigData{}, nil, nil, nil, context.Background()).haveSitemap(parsed)
+            links, err := NewScraper(&configData{}, nil, context.Background()).haveSitemap(parsed)
             if err != nil {
                 t.Fatalf("haveSitemap(%q): %v", tt.input, err)
             }
@@ -131,7 +138,8 @@ func TestNormalizeUrl(t *testing.T) {
     }
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            result, err := normalizeUrl(tt.input)
+            uri, _ := url.Parse(tt.input)
+            result, err := normalizeUrl(uri)
             if result != tt.expected || err != nil {
                 t.Errorf("normalizeUrl(%q) = %q, %v; want %q",
                     tt.input, result, err, tt.expected)

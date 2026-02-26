@@ -34,17 +34,16 @@
         "https://venturebeat.com",
         "https://slashdot.org"
     ],
-    "info_log_path" : "./logs/info.log",
+    "info_log_path" : "-",
     "index_path" : "./.data/index",
     "model_sever_link" : "http://127.0.0.1:50920",
     "tui_border_color" : "#fffff0",
     "log_channel_size" : 10000,
-    "ticker_time_milliseconds" : 1000,
+    "ticker_time_milliseconds" : 100,
     "worker_count" : 40,
-    "task_count" : 1000,
     "max_depth_crawl" : 8,
     "ngram_count" : 3,
-    "max_typo" : 2,
+    "max_typo" : 3,
     "chunk_size" : 75,
     "only_same_domain" : false
 }
