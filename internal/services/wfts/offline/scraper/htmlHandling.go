@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"slices"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -235,14 +236,9 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	return
 }
 
+var garbageTags = []string{"script", "style", "iframe", "aside", "nav", "footer", "div"}
 func isGarbage(tag string) bool {
-	garbageTags := []string{"script", "style", "iframe", "aside", "nav", "footer", "div"}
-	for _, t := range garbageTags {
-		if tag == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(garbageTags, tag)
 }
 
 const wantedCharset = "utf-8"

@@ -21,7 +21,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return fmt.Errorf("context canceled")
 	}
 	i := 0
-	allWordTokens := []string{}
+	allWordTokens := make([]string, 0, 128)
 	for _, passage := range passages {
 		orig, stemmed, err := idx.stemmer.TokenizeAndStem(passage.Text)
 		if err != nil {
@@ -99,7 +99,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 		return nil, nil, fmt.Errorf("empty tokens")
 	}
 	lenWords := len(words)
-	stemmedTokens := []string{}
+	stemmedTokens := make([]string, 0, lenStem)
 	wordPos := 0
 	isTwoWordCorrection := false
 	lastDoubleCorrPointer := lenStem

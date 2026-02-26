@@ -82,7 +82,7 @@ func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
 }
 
 func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error) {
-	result := []string{}
+	result := make([]string, 0, 64)
 	alreadyInc := map[string]struct{}{}
 
 	for _, ngram := range ir.extractNGrams(word, n) {
@@ -126,7 +126,7 @@ func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error)
 
 func (ir *IndexRepository) extractNGrams(word string, n int) []string {
 	runes := []rune(strings.ToLower(word))
-	out := []string{}
+	out := make([]string, 0, 8)
 	alIn := map[string]struct{}{}
 	if len(runes) < n {
 		return nil
@@ -143,7 +143,7 @@ func (ir *IndexRepository) extractNGrams(word string, n int) []string {
 }
 
 func (ir *IndexRepository) GetSimilarSignatures(signature [128]uint64) ([][128]uint64, error) {
-	result := [][128]uint64{}
+	result := make([][128]uint64, 0, 16)
 	alreadyInc := map[[128]uint64]struct{}{}
 
 	for i := 0; i <= 128 - 4; i += 4 {

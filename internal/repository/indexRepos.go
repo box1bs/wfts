@@ -60,7 +60,7 @@ func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
 }
 
 func (ir *IndexRepository) SaveVisitedUrls(visitedURLs *sync.Map) error {
-	urls := []struct{url string; depth int}{}
+	urls := make([]struct{url string; depth int}, 0, 512)
 	visitedURLs.Range(func(key, value any) bool {
 		if url, ok := key.(string); ok {
 			urls = append(urls, struct{url string; depth int}{url, value.(int)})
