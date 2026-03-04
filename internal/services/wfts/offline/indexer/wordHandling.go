@@ -7,9 +7,11 @@ import (
 
 	"wfts/internal/model"
 	"wfts/internal/services/wfts/offline/indexer/textHandling"
+
+	lr "github.com/box1bs/logistic_regression_go"
 )
 
-func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, priority *float64, passages []model.Passage) error {
+func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, externalFeatures *model.CrawlFeatures, priority *float64, passages []model.Passage) error {
 	stem := make(map[string]int, 512)
 	pos := make(map[string][]model.Position, 512)
 	
@@ -21,7 +23,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return fmt.Errorf("context canceled")
 	}
 	i := 0
-	allWordTokens := []string{}
+	allWordTokens := make([]string, 0, 256)
 	for _, passage := range passages {
 		orig, stemmed, err := idx.stemmer.TokenizeAndStem(passage.Text)
 		if err != nil {
@@ -42,8 +44,18 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		}
 	}
 	doc.TokenCount = i
+	utokens := len(pos)
+	skipIndexAdding := false
+	X := lr.Vec(float64(externalFeatures.DomDepth), float64(externalFeatures.TagCount), float64(externalFeatures.UrlCount),
+	float64(doc.TokenCount), float64(utokens), float64(doc.TokenCount) / float64(externalFeatures.UrlCount), float64(utokens) / float64(doc.TokenCount),
+	float64(externalFeatures.UrlLen), float64(externalFeatures.PathLen), float64(externalFeatures.HostLen))
+	idx.scaler.Scale1D(X)
+	score := idx.model.Predict(X)[0]
+	if score == 0 && doc.TokenCount < 150 {
+		skipIndexAdding = true
+	}
 
-	if l := len(allWordTokens); l > 4 {
+	if l := len(allWordTokens); !skipIndexAdding && l > 4 {
 		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
 		conds, err := idx.repository.GetSimilarSignatures(sign)
 		if err != nil {
@@ -66,6 +78,10 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		logger.Errorf("error updating bigrams frequency: %v", err)
 		return err
 	}
+	if skipIndexAdding {
+		logger.Debugf("potentially garbage link")
+		return fmt.Errorf("skipped by model decision")
+	}
 	if err := idx.repository.SaveDocument(doc); err != nil {
 		logger.Errorf("error saving document: %v", err)
 		return err
@@ -79,8 +95,8 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return err
 	}
 
-	*priority += math.Log(float64(len(pos)) + 1) // (1 + sameDomain) * (log(linksNumber + 1) + log(UniqTokenCount + 1)) / ((parentDepth + 1) * (log(tokenCount + 1) + 1)) * e**(-a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
-	*priority /= (math.Log(float64(doc.TokenCount) + 1) + 1)
+	*priority += math.Log(float64(utokens) + 1) // (1 + sameDomain) * (log(linksNumber + 1) + log(UniqTokenCount + 1)) / ((parentDepth + 1) * (1 - modelScore) * (log(tokenCount + 1) + 1)) * e**(-a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
+	*priority /= ((math.Log(float64(doc.TokenCount) + 1) + 1) * (1 - score))
 	return nil
 }
 
@@ -99,7 +115,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 		return nil, nil, fmt.Errorf("empty tokens")
 	}
 	lenWords := len(words)
-	stemmedTokens := []string{}
+	stemmedTokens := make([]string, 0, lenStem)
 	wordPos := 0
 	isTwoWordCorrection := false
 	lastDoubleCorrPointer := lenStem

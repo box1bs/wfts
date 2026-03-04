@@ -1,6 +1,7 @@
 package scraper
 
 import (
+	"slices"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -46,31 +47,33 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 	
 	hashed := sha256.Sum256([]byte(norm))
     document := &model.Document{
-        Id: hashed,
+        Id:  hashed,
         URL: cur.String(),
     }
 
+	features := &model.CrawlFeatures{PathLen: len(cur.Path), UrlLen: len(cur.String()), HostLen: len(cur.Hostname())}
 	c, cancel := context.WithTimeout(ctx, deadlineTime)
 	defer cancel()
-    links, passages := ws.parseHTMLStream(c, doc, cur, gd)
+    links, passages := ws.parseHTMLStream(c, doc, cur, features, gd)
 	if l := len(links); l != 0 {
 		ws.lru.Put(hashed, links)
 		*pr += math.Log(float64(l) + 1)
 	}
 
-	return links, ws.HandleDocumentWords(ctx, document, pr, passages)
+	return links, ws.HandleDocumentWords(ctx, document, features, pr, passages)
 }
 
-func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, currentDeep int) (links []*linkToken, pasages []model.Passage) {
+func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, features *model.CrawlFeatures, currentDeep int) (links []*linkToken, pasages []model.Passage) {
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
 	var headerType byte
 	var garbageTagCounter int
 	var isAncore bool
 	links = make([]*linkToken, 0, 64)
 	visit := make([]*linkToken, 0, 16)
+	curDomDepth := 0
 
 	ws.rlMu.RLock()
-	rules := ws.rulesMap[truncatePort(baseURL)]
+	rules := ws.rulesMap[baseURL.Hostname()]
 	ws.rlMu.RUnlock()
 
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
@@ -102,6 +105,8 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 
 		switch tokenType {
 		case html.StartTagToken:
+			curDomDepth++
+			features.TagCount++
 			if garbageTagCounter > 0 {
 				break
 			}
@@ -109,6 +114,11 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			t := tokenizer.Token()
 			tagName := t.Data
 			switch tagName {
+			case "html":
+				for _, attr := range t.Attr {
+					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {log.Debugf("Not eng html"); return}
+				}
+
 			case "h1", "h2":
 				headerType += tagName[1]
 
@@ -145,7 +155,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								log.Errorf("error normalizing url: %v", err)
 								break
 							}
-							if path := uri.Path; strings.Contains(path, "pdf") || strings.Contains(path, "xml") {
+							if path := strings.ToLower(uri.Path); (strings.Contains(path, "pdf") || strings.Contains(path, "xml")) && !strings.Contains(path, "html") {
 								log.Infof("potential pdf or xml link: %s", uri.String())
 								break
 							}
@@ -172,10 +182,12 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 							same := isSameOrigin(uri, baseURL)
 							if depth, vis := ws.visited.Load(normalized); vis {
 								if depth.(int) > currentDeep {
+									features.UrlCount++
 									visit = append(visit, &linkToken{Link: uri, SameDomain: same})
 								}
 								break
 							}
+							features.UrlCount++
 							links = append(links, &linkToken{Link: uri, SameDomain: same})
 						}
 						break
@@ -188,6 +200,8 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			}
 
 		case html.EndTagToken:
+			if curDomDepth > features.DomDepth {features.DomDepth = curDomDepth}
+			curDomDepth--
 			t := tokenizer.Token()
 			tagName := strings.ToLower(t.Data)
 			if isAncore && tagName[0] == 'a' {
@@ -229,20 +243,16 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 
 		}
 	}
+	if curDomDepth > features.DomDepth {features.DomDepth = curDomDepth}
 	if len(visit) != 0 {
 		links = append(links, visit...)
 	}
 	return
 }
 
+var garbageTags = []string{"script", "style", "iframe", "aside", "nav", "footer", "div"}
 func isGarbage(tag string) bool {
-	garbageTags := []string{"script", "style", "iframe", "aside", "nav", "footer", "div"}
-	for _, t := range garbageTags {
-		if tag == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(garbageTags, tag)
 }
 
 const wantedCharset = "utf-8"

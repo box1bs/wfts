@@ -136,11 +136,11 @@ func (s *EnglishStemmer) measure(word string) int {
 
 func (s *EnglishStemmer) TokenizeAndStem(text string) ([]string, []token, error) {
 	tokens := s.tokenizer.entityTokenize(text)
-	wordTokens := []string{}
-	stemmedTokens := []token{}
+	wordTokens := make([]string, 0, 32)
+	stemmedTokens := make([]token, 0, 64)
 	for _, t := range tokens {
 		if t.Type == WORD && len(t.Value) > 0 {
-			if stemmed := s.stem(t.Value); stemmed != "" { // пофиксить: не игнорировать стоп слова, их вполне можно использовать как кандидаты для замены, ну или нет, т.к. у них больше вероятность по цепям маркова
+			if stemmed := s.stem(t.Value); stemmed != "" {
 				wordTokens = append(wordTokens, t.Value)
 				stemmedTokens = append(stemmedTokens, token{Type: WORD, Value: stemmed})
 			}

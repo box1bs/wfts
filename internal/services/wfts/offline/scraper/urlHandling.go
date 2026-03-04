@@ -30,7 +30,7 @@ func makeAbsoluteURL(rawURL string, baseURL *url.URL) (string, error) {
 }
 
 func normalizeUrl(uri *url.URL) (string, error) {
-	host := strings.TrimPrefix(strings.ToLower(truncatePort(uri)), "www.")
+	host := strings.TrimPrefix(strings.ToLower(uri.Hostname()), "www.")
 
 	path := uri.Path
 	if strings.Contains(path, "//") {
@@ -49,10 +49,6 @@ func normalizeUrl(uri *url.URL) (string, error) {
 	return sb.String(), nil
 }
 
-func truncatePort(uri *url.URL) string {
-	return strings.Split(uri.Hostname(), ":")[0]
-}
-
 func isSameOrigin(rawURL *url.URL, baseURL *url.URL) bool {
-	return strings.Contains(truncatePort(baseURL), truncatePort(rawURL))
+	return strings.Contains(baseURL.Hostname(), rawURL.Hostname())
 }

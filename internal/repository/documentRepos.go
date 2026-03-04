@@ -32,7 +32,6 @@ func (ir *IndexRepository) documentToBytes(doc *model.Document) ([]byte, error) 
 
 func (ir *IndexRepository) bytesToDocument(body []byte) (*model.Document, error) {
 	p := docDBSt{}
-	
 	if err := json.Unmarshal(body, &p); err != nil {
 		return nil, err
 	}
@@ -85,7 +84,7 @@ func (ir *IndexRepository) GetDocumentByID(docID [32]byte) (*model.Document, err
 }
 
 func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
-	var documents []*model.Document
+	documents := make([]*model.Document, 0, 512)
 	err := ir.DB.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchSize = 10

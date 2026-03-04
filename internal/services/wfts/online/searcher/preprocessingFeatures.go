@@ -9,7 +9,7 @@ import (
 func calcBM25(idf, avgLen, tf, tokens float64) float64 {
 	k1 := 1.2
 	b := 0.75
-	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * tokens / avgLen))
+	return idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * (math.Log(tokens / avgLen) + 0.01)))
 }
 
 const a = 50

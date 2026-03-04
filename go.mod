@@ -1,8 +1,9 @@
 module wfts
 
-go 1.24.3
+go 1.26.0
 
 require (
+	github.com/box1bs/logistic_regression_go v0.0.0-20260304163853-c22181b48c28
 	github.com/dgraph-io/badger/v3 v3.2103.5
 	golang.org/x/net v0.46.0
 )

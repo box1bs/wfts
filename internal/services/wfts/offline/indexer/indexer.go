@@ -8,6 +8,8 @@ import (
 	"wfts/internal/model"
 	"wfts/internal/services/wfts/offline/indexer/spellChecker"
 	"wfts/internal/services/wfts/offline/indexer/textHandling"
+
+	lr "github.com/box1bs/logistic_regression_go"
 )
 
 type repository interface {
@@ -40,6 +42,8 @@ type repository interface {
 
 type indexer struct {
 	repository
+	model 		lr.RegressionModel
+	scaler 		lr.Scaler
 	stemmer 	*textHandling.EnglishStemmer
 	sc 			*spellChecker.SpellChecker
 	minHash 	*minHash
@@ -47,7 +51,17 @@ type indexer struct {
 }
 
 func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
+	model := lr.LogisticRegressor(0.4)
+	if err := model.LoadFromFile("./model"); err != nil {
+		return nil, err
+	}
+	scaler := lr.RobustScaler()
+	if err := scaler.LoadFromFile("./scaler"); err != nil {
+		return nil, err
+	}
 	idx := &indexer{
+		model: 		model,
+		scaler: 	scaler,
 		stemmer:   	textHandling.NewEnglishStemmer(),
 		sc: 		spellChecker.NewSpellChecker(config.MaxTypo, config.NGramCount),
 		mu: 		new(sync.RWMutex),
