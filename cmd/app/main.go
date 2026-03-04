@@ -149,10 +149,10 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	}
 	manager := ui.New(0.3, 0.4, 0.15, lw, ir.GetDocumentsCount, searcher.NewSearcher(i, ir).Search)
 	if err := manager.Run(cancel); err != nil && err.Error() != "quit" {
-		cancel()
 		model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 			ReplaceAttr: model.Replacer,
 		}))).Errorf("%v", err)
 	}
+	cancel()
 	<-done
 }

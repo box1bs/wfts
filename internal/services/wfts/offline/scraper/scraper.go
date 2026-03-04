@@ -21,7 +21,7 @@ import (
 )
 
 type indexer interface {
-    HandleDocumentWords(context.Context, *model.Document, *float64, []model.Passage) error
+    HandleDocumentWords(context.Context, *model.Document, *model.CrawlFeatures, *float64, []model.Passage) error
 	IndexUrlsByHash([32]byte, []byte) error
 	GetPageUrlsByHash([32]byte) ([]byte, error)
 	SaveVisitedUrls(*sync.Map) error
@@ -139,7 +139,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 	if err.Error() == BaseXMLPageError || ws.checkContext(ctx) {
 		return
 	}
-	host := truncatePort(currentURL)
+	host := currentURL.Hostname()
 	ws.rlMu.Lock()
 	if rls != nil && ws.rulesMap[host] == nil {
 		ws.rulesMap[host] = rls
@@ -227,7 +227,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, currentURL *url.URL
 			ws.rlMu.Unlock()
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 				ReplaceAttr: model.Replacer,
-				Level: slog.LevelError,
+				Level: slog.LevelDebug,
 			})).With("url", link.Link.String()))
 			c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()

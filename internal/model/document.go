@@ -18,6 +18,15 @@ type Passage struct {
 	Type byte
 }
 
+type CrawlFeatures struct {
+	DomDepth int
+	TagCount int
+	UrlLen 	 int
+	UrlCount int
+	PathLen	 int
+	HostLen	 int
+}
+
 type WordCountAndPositions struct {
 	Count 		int
 	Positions 	[]Position
