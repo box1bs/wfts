@@ -9,10 +9,6 @@ type ConfigData struct {
 	BaseURLs       			[]string 	`json:"base_urls" validate:"required,len=1:100"`
 	InfoLogPath   			string   	`json:"info_log_path" validate:"required"` // use '-' for stdout
 	IndexPath     			string   	`json:"index_path" validate:"required"`
-	PythonSrvPath     		string   	`json:"model_sever_link" validate:"required"`
-	TUIBorderColor			string 		`json:"tui_border_color" validate:"required"`
-	LogChannelSize 			int      	`json:"log_channel_size" validate:"min=1000,max=50000"`
-	TickerTimeMilliseconds  int  		`json:"ticker_time_milliseconds" validate:"min=500,max=10000"`
 	WorkersCount   			int      	`json:"worker_count" validate:"min=50,max=2000"`
 	MaxDepth       			int      	`json:"max_depth_crawl" validate:"min=1,max=10"`
 	NGramCount    			int      	`json:"ngram_count" validate:"min=2,max=5"`

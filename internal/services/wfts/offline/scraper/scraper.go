@@ -115,7 +115,7 @@ func (ws *WebScraper) Run() error {
 			ws.rlMu.Unlock()
 			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
-			ws.ScrapeWithContext(ctx, parsed, 0, 0)
+			ws.ScrapeWithContext(ctx, parsed, 1, 0)
 		}})
 	}
 	ws.pool.Wait()

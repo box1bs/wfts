@@ -23,7 +23,7 @@ import (
 
 type linkToken struct {
 	Link 		*url.URL
-	Ancore		string // пока просто собираем
+	// Ancore		string // пока просто собираем
 	SameDomain 	bool
 }
 
@@ -67,7 +67,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
 	var headerType byte
 	var garbageTagCounter int
-	var isAncore bool
+	// var isAncore bool
 	links = make([]*linkToken, 0, 64)
 	visit := make([]*linkToken, 0, 16)
 	curDomDepth := 0
@@ -178,7 +178,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 									break
 								}
 							}
-							isAncore = true
+							// isAncore = true
 							same := isSameOrigin(uri, baseURL)
 							if depth, vis := ws.visited.Load(normalized); vis {
 								if depth.(int) > currentDeep {
@@ -204,10 +204,10 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			curDomDepth--
 			t := tokenizer.Token()
 			tagName := strings.ToLower(t.Data)
-			if isAncore && tagName[0] == 'a' {
-				isAncore = false
-				continue
-			}
+			// if isAncore && tagName[0] == 'a' {
+			// 	isAncore = false
+			// 	continue
+			// }
 			if tagName[0] == 'h' && len(tagName) > 1 && (tagName[1] == '1' || tagName[1] == '2') {
 				headerType -= tagName[1]
 				continue
@@ -218,10 +218,10 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			}
 
 		case html.TextToken:
-			if isAncore && len(links) > 0 {
-				links[len(links) - 1].Ancore = string(bytes.TrimSpace(tokenizer.Text()))
-				continue
-			}
+			// if isAncore && len(links) > 0 {
+			// 	links[len(links) - 1].Ancore = string(bytes.TrimSpace(tokenizer.Text()))
+			// 	continue
+			// }
 			if garbageTagCounter > 0 {
 				continue
 			}
