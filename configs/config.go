@@ -6,8 +6,9 @@ import (
 )
 
 type ConfigData struct {
-	BaseURLs       			[]string 	`json:"base_urls" validate:"required,len=1:100"`
-	InfoLogPath   			string   	`json:"info_log_path" validate:"required"` // use '-' for stdout
+	BaseURLs       			[]string 	`json:"base_urls" validate:"required,len=1:500"`
+	LogPath   				string   	`json:"info_log_path"`
+	BackupPath				string		`json:"backup_path"`
 	IndexPath     			string   	`json:"index_path" validate:"required"`
 	WorkersCount   			int      	`json:"worker_count" validate:"min=50,max=2000"`
 	MaxDepth       			int      	`json:"max_depth_crawl" validate:"min=1,max=10"`

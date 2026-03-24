@@ -122,7 +122,7 @@ func (ws *WebScraper) prepareSitemapLinks(ctx context.Context, current *url.URL)
 	var err error
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
 	if log == nil {
-		return nil, fmt.Errorf("context canceled")
+		return nil, fmt.Errorf(canceled)
 	}
 	if urls, err = ws.haveSitemap(current); err == nil && len(urls) > 0 {
 		for _, link := range urls {
