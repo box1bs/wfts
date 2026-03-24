@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"time"
+	"strings"
 
 	"wfts/configs"
 	"wfts/internal/model"
@@ -38,8 +38,8 @@ func main() {
 	}
 	
 	out := os.Stdout
-	if cfg.InfoLogPath != "-" {
-		out, err = os.Create(cfg.InfoLogPath)
+	if cfg.LogPath != "" {
+		out, err = os.OpenFile(cfg.LogPath, os.O_WRONLY | os.O_CREATE, 0600)
 		if err != nil {
 			panic(err)
 		}
@@ -73,7 +73,7 @@ func main() {
 		panic(err)
 	}
 	if !*indexFlag {
-		ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+		ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, cfg.BackupPath, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
 		if err := ws.Run(); err != nil {
 			panic(err)
 		}
@@ -90,13 +90,12 @@ func main() {
 	for {
 		fmt.Print("\n> ")
 		query, _ := reader.ReadString('\n')
+		query = strings.TrimSpace(query)
 		if query == "q" {
 			return
 		}
-		t := time.Now()
 		topN, topNMetrics, metrics := s.Search(out, query, 100)
 		Present(topN, topNMetrics, metrics)
-		fmt.Printf("--Search time: %v--\n", time.Since(t))
 	}
 }
 
@@ -136,7 +135,7 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 
 	if !indexF {
 		go func() {
-			ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
+			ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, cfg.BackupPath, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
 			if err := ws.Run(); err != nil {
 				model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
 					ReplaceAttr: model.Replacer,

@@ -23,7 +23,9 @@ import (
 
 type linkToken struct {
 	Link 		*url.URL
-	// Ancore		string // пока просто собираем
+	Priority 	float64
+	Depth 		int
+	// Ancore		string
 	SameDomain 	bool
 }
 
@@ -34,7 +36,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 	doc, err := ws.getHTML(ctx, cur.String(), rl, numOfTries)
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
 	if log == nil {
-		return nil, fmt.Errorf("context canceled")
+		return nil, fmt.Errorf(canceled)
 	}
     if err != nil {
 		log.Errorf("error getting html: %v", err)

@@ -27,6 +27,13 @@ type CrawlFeatures struct {
 	HostLen	 int
 }
 
+type CompletionState int
+const (
+	Done CompletionState = iota
+	Canceled
+	Error
+)
+
 type WordCountAndPositions struct {
 	Count 		int
 	Positions 	[]Position
@@ -75,6 +82,7 @@ func NewTypeTextObj[T Passage | Position](t byte, text string, i int) T {
 }
 
 type CrawlNode struct {
-	Activation 	func()
+	Activation 	func() CompletionState
+	CrawlToken  any
 	Priority 	float64
 }

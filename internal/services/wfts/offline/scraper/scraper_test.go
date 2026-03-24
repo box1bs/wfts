@@ -92,6 +92,7 @@ func TestHaveSitemap(t *testing.T) {
                 "https://www.google.com/nonprofits/sitemap.xml",
                 "https://www.google.com/finance/sitemap.xml",
                 "https://www.google.com/shopping/sitemap.xml",
+                "https://www.google.com/grants/sitemap.xml",
             },
         },
     }

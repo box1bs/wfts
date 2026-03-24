@@ -11,7 +11,16 @@ type Item struct {
 }
 
 type minMaxHeap struct {
+	len  int
 	data []Item
+}
+
+func (h *minMaxHeap) tokens() []any {
+	values := make([]any, h.len)
+	for i := range h.len {
+		values = append(values, h.data[i].Value.CrawlToken)
+	}
+	return values
 }
 
 func NewMinMaxHeap() *minMaxHeap {
@@ -21,6 +30,7 @@ func NewMinMaxHeap() *minMaxHeap {
 func (h *minMaxHeap) Insert(v *model.CrawlNode) {
 	h.data = append(h.data, Item{v.Priority, v})
 	h.bubbleUp(len(h.data) - 1)
+	h.len++
 }
 
 func (h *minMaxHeap) GetMin() (Item, bool) {
@@ -45,9 +55,10 @@ func (h *minMaxHeap) GetMax() (Item, bool) {
 }
 
 func (h *minMaxHeap) DeleteMin() (Item, bool) {
-	if len(h.data) == 0 {
+	if h.len == 0 {
 		return Item{}, false
 	}
+	h.len--
 	min := h.data[0]
 	last := len(h.data) - 1
 	h.data[0] = h.data[last]
@@ -59,10 +70,11 @@ func (h *minMaxHeap) DeleteMin() (Item, bool) {
 }
 
 func (h *minMaxHeap) DeleteMax() (Item, bool) {
-	n := len(h.data)
+	n := h.len
 	if n == 0 {
 		return Item{}, false
 	}
+	h.len--
 
 	var idx int
 	if n == 1 {
@@ -209,7 +221,7 @@ func (h *minMaxHeap) largestDescendant(i int) int {
 }
 
 func (h *minMaxHeap) extremeDescendant(i int, min bool) int {
-	n := len(h.data)
+	n := h.len
 	best := -1
 
 	children := []int{2 * i + 1, 2 * i + 2}

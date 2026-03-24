@@ -34,7 +34,8 @@
         "https://venturebeat.com",
         "https://slashdot.org"
     ],
-    "info_log_path" : "-",
+    "info_log_path" : "./logs/1.log",
+    "backup_path" : "./.scratches",
     "index_path" : "./.data/index",
     "worker_count" : 40,
     "max_depth_crawl" : 8,
