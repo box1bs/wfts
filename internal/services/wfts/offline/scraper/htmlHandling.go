@@ -1,7 +1,6 @@
 package scraper
 
 import (
-	"slices"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -10,7 +9,9 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -157,8 +158,8 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								log.Errorf("error normalizing url: %v", err)
 								break
 							}
-							if path := strings.ToLower(uri.Path); (strings.Contains(path, "pdf") || strings.Contains(path, "xml")) && !strings.Contains(path, "html") {
-								log.Infof("potential pdf or xml link: %s", uri.String())
+							if ext := strings.ToLower(path.Ext(uri.Path)); ext == ".pdf" || ext == ".xml" {
+								log.Infof("pdf or xml link: %s", uri.String())
 								break
 							}
 							if types := uri.Query()["format"]; len(types) > 0 {
