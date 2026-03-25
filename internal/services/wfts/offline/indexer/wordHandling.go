@@ -55,14 +55,15 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		skipIndexAdding = true
 	}
 
+	sim := 1.0
 	if l := len(allWordTokens); !skipIndexAdding && l > 4 {
 		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
 		conds, err := idx.repository.GetSimilarSignatures(sign)
 		if err != nil {
 			return err
 		}
-		if simRate := calcSim(sign, conds); simRate > 0.8 {
-			logger.Debugf("finded %f similar page, with word tokens len: %d", simRate, len(allWordTokens))
+		if sim = calcSim(sign, conds); sim > 0.8 {
+			logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
 			return fmt.Errorf("page already indexed")
 		}
 		if err := idx.repository.IndexDocShingles(sign); err != nil {
@@ -95,8 +96,8 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return err
 	}
 
-	*priority += math.Log(float64(utokens) + 1) // (1 + sameDomain) * (log(linksNumber + 1) + log(UniqTokenCount + 1)) / ((parentDepth + 1) * (1 - modelScore) * (log(tokenCount + 1) + 1)) * e**(-a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
-	*priority /= ((math.Log(float64(doc.TokenCount) + 1) + 1) * (1 - score))
+	*priority += math.Log(float64(utokens) + 1) + 1 // (1 + sameDomain) * (log(linksNumber + 1) + log(UniqTokenCount + 1) + 1) / ((parentDepth + 1) * (1 - simRate) * (log(tokenCount + 1) + 1)) * e**(-a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
+	*priority /= ((math.Log(float64(doc.TokenCount) + 1) + 1) * (1 - sim))
 	return nil
 }
 
