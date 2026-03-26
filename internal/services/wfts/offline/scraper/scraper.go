@@ -150,7 +150,13 @@ func (ws *WebScraper) Run() error {
 		log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 			ReplaceAttr: model.Replacer,
 			Level:       slog.LevelError,
-		})).With("url", uri.Link.String()))
+		})).With(
+			slog.Group("node_properties",
+				slog.String("url", uri.Link.String()),
+				slog.Int("depth", uri.Depth),
+				slog.Float64("priority", uri.Priority),
+			),
+		))
 		ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
 			ws.rlMu.Lock()
 			rl := NewRateLimiter(DefaultDelay)
@@ -251,8 +257,6 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 		}
 	}
 
-	log.Infof("parent priority: %f, links number: %d", curLink.Priority, len(links))
-
 	for _, link := range links {
 		if ws.cfg.OnlySameDomain && !link.SameDomain {
 			continue
@@ -278,7 +282,13 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 				ReplaceAttr: model.Replacer,
 				Level:       slog.LevelDebug,
-			})).With("url", link.Link.String()))
+			})).With(
+				slog.Group("node_properties",
+					slog.String("url", link.Link.String()),
+					slog.Int("depth", link.Depth),
+					slog.Float64("priority", link.Priority),
+				),
+			))
 			c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
 			return ws.ScrapeWithContext(c, link)

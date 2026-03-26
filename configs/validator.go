@@ -19,8 +19,8 @@ func (v *validator) Validate(i any) error {
 	fields := make([]reflect.StructField, 0)
 	val := reflect.TypeOf(i)
 
-	for i := range val.NumField() {
-		fields = append(fields, val.Field(i))
+	for field := range val.Fields() {
+		fields = append(fields, field)
 	}
 
 	for _, field := range fields {
