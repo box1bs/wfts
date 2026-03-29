@@ -14,7 +14,6 @@ import (
 
 	"wfts/internal/model"
 	lrucache "wfts/internal/services/wfts/offline/scraper/lruCache"
-	"wfts/internal/utils/parser"
 	"wfts/internal/utils/scheduler"
 
 	"context"
@@ -36,15 +35,15 @@ type indexer interface {
 
 type WebScraper struct {
 	indexer
-	client    *http.Client
-	visited   *sync.Map
-	cfg       *configData
-	rlMu      *sync.RWMutex
-	lru       *lrucache.LRUCache
-	pool      *scheduler.WorkerPool
-	globalCtx context.Context
-	rlMap     map[string]*rateLimiter
-	rulesMap  map[string]*parser.RobotsTxt
+	client    	*http.Client
+	visited   	*sync.Map
+	cfg       	*configData
+	lru       	*lrucache.LRUCache
+	rlCache   	*lrucache.LRUCache
+	rulesCache 	*lrucache.LRUCache
+	mu 			*sync.Mutex
+	pool      	*scheduler.WorkerPool
+	globalCtx 	context.Context
 }
 
 type configData struct {
@@ -89,18 +88,17 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 		},
 		visited:   new(sync.Map),
 		cfg:       cfg,
-		rlMu:      new(sync.RWMutex),
 		lru:       lrucache.NewLRUCache(cfg.WorkersNum * 10),
+		rlCache:   lrucache.NewLRUCache(cfg.WorkersNum * 25),
+		rulesCache:lrucache.NewLRUCache(cfg.WorkersNum * 25),
+		mu: 	   &sync.Mutex{},
 		globalCtx: c,
-		rlMap:     make(map[string]*rateLimiter),
-		rulesMap:  make(map[string]*parser.RobotsTxt),
 	}
 	ws.pool = scheduler.NewWorkerPool(ws.makeScratchMark, cfg.WorkersNum, cfg.WorkersNum*50)
 	return ws
 }
 
 func (ws *WebScraper) Run() error {
-	defer ws.putDownLimiters()
 	if err := ws.LoadVisitedUrls(ws.visited); err != nil {
 		return err
 	}
@@ -158,10 +156,7 @@ func (ws *WebScraper) Run() error {
 			),
 		))
 		ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
-			ws.rlMu.Lock()
-			rl := NewRateLimiter(DefaultDelay)
-			ws.rlMap[uri.Link.Hostname()] = rl
-			ws.rlMu.Unlock()
+			ws.rlCache.Put(uri.Link.Hostname(), NewRateLimiter(DefaultDelay))
 			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
 			defer cancel()
 			return ws.ScrapeWithContext(ctx, uri)
@@ -191,11 +186,11 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 		return model.Done
 	}
 	host := curLink.Link.Hostname()
-	ws.rlMu.Lock()
-	if rls != nil && ws.rulesMap[host] == nil {
-		ws.rulesMap[host] = rls
+	ws.mu.Lock()
+	if rls != nil && ws.rulesCache.Get(host) == nil {
+		ws.rulesCache.Put(host, rls)
 	}
-	ws.rlMu.Unlock()
+	ws.mu.Unlock()
 	hashed := sha256.Sum256([]byte(normalized))
 	load := false
 
@@ -274,11 +269,6 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 		link.Priority = link.Priority / (float64(curLink.Depth) + 1) * curLink.Priority * math.Exp(-0.6*float64(visPenalty))
 
 		ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
-			ws.rlMu.Lock()
-			if _, ex := ws.rlMap[link.Link.Host]; !ex {
-				ws.rlMap[link.Link.Hostname()] = NewRateLimiter(DefaultDelay)
-			}
-			ws.rlMu.Unlock()
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 				ReplaceAttr: model.Replacer,
 				Level:       slog.LevelDebug,
@@ -351,14 +341,6 @@ func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {
 		result = append(result, &token)
 	}
 	return result, nil
-}
-
-func (ws *WebScraper) putDownLimiters() {
-	ws.rlMu.Lock()
-	defer ws.rlMu.Unlock()
-	for _, limiter := range ws.rlMap {
-		limiter.Shutdown()
-	}
 }
 
 func (ws *WebScraper) checkContext(ctx context.Context) bool {
