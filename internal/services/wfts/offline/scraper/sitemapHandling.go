@@ -26,13 +26,11 @@ func (ws *WebScraper) fetchPageRulesAndOffers(ctx context.Context, cur *url.URL)
 	robotsTXT := &parser.RobotsTxt{}
 	if r, err := parser.FetchRobotsTxt(ctx, cur.String(), ws.client); r != "" && err == nil {
 		*robotsTXT = *parser.ParseRobotsTxt(r)
-		ws.rlMu.Lock()
-		if lim := ws.rlMap[cur.Host]; (lim == nil || lim.R == DefaultDelay) && robotsTXT.Rules["*"].Delay > 0 {
-			ws.rlMap[cur.Host] = NewRateLimiter(robotsTXT.Rules["*"].Delay)
-		} else if lim == nil {
-			ws.rlMap[cur.Host] = NewRateLimiter(DefaultDelay)
+		ws.mu.Lock()
+		if lim, ok := ws.rlCache.Get(cur.Hostname()).(*rateLimiter); ok && (lim == nil || lim.R == DefaultDelay) && robotsTXT.Rules["*"].Delay > 0 {
+			ws.rlCache.Put(cur.Host, NewRateLimiter(robotsTXT.Rules["*"].Delay))
 		}
-		ws.rlMu.Unlock()
+		ws.mu.Unlock()
 	} else {
 		robotsTXT = nil
 	}

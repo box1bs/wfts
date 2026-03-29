@@ -48,6 +48,7 @@ func main() {
 
 	log := model.NewLogger(slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
+		Level: slog.LevelDebug,
 	})))
 
 	ir, err := repository.NewIndexRepository(cfg.IndexPath, log, cfg.ChunkSize)

@@ -23,7 +23,7 @@ type repository interface {
 	GetWordsByNGram(string, int) ([]string, error)
 	IndexDocShingles([128]uint64) error
 	GetSimilarSignatures([128]uint64) ([][128]uint64, error)
-	FlushAll()
+	FlushAll() error
 
 	UpdateBiFreq(map[[2]uint64]int) error
 	GetFreq(uint64, uint64) (int, error)

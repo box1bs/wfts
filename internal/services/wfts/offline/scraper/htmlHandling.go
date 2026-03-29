@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"wfts/internal/model"
+	"wfts/internal/utils/parser"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/charset"
@@ -31,9 +32,13 @@ type linkToken struct {
 }
 
 func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *url.URL, norm string, gd int) ([]*linkToken, error) {
-	ws.rlMu.RLock()
-	rl := ws.rlMap[cur.Host]
-	ws.rlMu.RUnlock()
+	ws.mu.Lock()
+	rl, ok := ws.rlCache.Get(cur.Hostname()).(*rateLimiter)
+	if !ok || rl == nil {
+		rl = NewRateLimiter(DefaultDelay)
+		ws.rlCache.Put(cur.Hostname(), rl)
+	}
+	ws.mu.Unlock()
 	doc, err := ws.getHTML(ctx, cur.String(), rl, numOfTries)
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
 	if log == nil {
@@ -75,9 +80,10 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	visit := make([]*linkToken, 0, 16)
 	curDomDepth := 0
 
-	ws.rlMu.RLock()
-	rules := ws.rulesMap[baseURL.Hostname()]
-	ws.rlMu.RUnlock()
+	rules, ok := ws.rulesCache.Get(baseURL.Hostname()).(*parser.RobotsTxt)
+	if !ok {
+		rules = nil
+	}
 
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
 

@@ -3,7 +3,7 @@ package lrucache
 import "sync"
 
 type LRUCache struct {
-	mp         map[[32]byte]*node
+	mp         map[any]*node
 	head, tail *node
 	mu         *sync.Mutex
 	capacity   int
@@ -11,7 +11,7 @@ type LRUCache struct {
 
 type node struct {
 	prev, next *node
-	key        [32]byte
+	key        any
 	value      any
 }
 
@@ -20,7 +20,7 @@ func NewLRUCache(cap int) *LRUCache {
 	head.next = tail
 	tail.prev = head
 	return &LRUCache{
-		mp: 		make(map[[32]byte]*node),
+		mp: 		make(map[any]*node),
 		head:     	head,
 		tail:     	tail,
 		mu: 		new(sync.Mutex),
@@ -28,14 +28,14 @@ func NewLRUCache(cap int) *LRUCache {
 	}
 }
 
-func newNode(key [32]byte, val any) *node {
+func newNode(key any, val any) *node {
 	return &node{
 		key:   key,
 		value: val,
 	}
 }
 
-func (lru *LRUCache) Get(key [32]byte) any {
+func (lru *LRUCache) Get(key any) any {
 	lru.mu.Lock()
 	defer lru.mu.Unlock()
 
@@ -48,7 +48,7 @@ func (lru *LRUCache) Get(key [32]byte) any {
 	return nil
 }
 
-func (lru *LRUCache) Put(key [32]byte, value any) {
+func (lru *LRUCache) Put(key any, value any) {
 	lru.mu.Lock()
 	defer lru.mu.Unlock()
 	
