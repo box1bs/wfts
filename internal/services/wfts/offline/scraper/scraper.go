@@ -31,7 +31,7 @@ type indexer interface {
 	SaveVisitedUrls(*sync.Map) error
 	LoadVisitedUrls(*sync.Map) error
 	SaveHashArrays() error
-	FlushAll()
+	FlushAll() error
 }
 
 type WebScraper struct {
@@ -304,7 +304,7 @@ func (ws *WebScraper) makeScratchMark(toMark []any) {
 	var buf bytes.Buffer
 	for _, t := range toMark {
 		token := t.(*linkToken)
-		if _, err := fmt.Fprintf(&buf, "%s|%f|%d\n", token.Link.String(), token.Priority, token.Depth); err != nil {
+		if _, err := fmt.Fprintf(&buf, "%s|%.16f|%d\n", token.Link.String(), token.Priority, token.Depth); err != nil {
 			return
 		}
 	}
@@ -329,24 +329,26 @@ func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {
 	saved := string(data[:len(data)-1])
 	tokens := strings.Split(saved, "\n")
 	tlen := len(tokens)
-	result := make([]*linkToken, tlen)
+	result := make([]*linkToken, 0)
 	for i := range tlen {
 		parts := strings.Split(tokens[i], "|")
 		if len(parts) != 3 {
 			return nil, fmt.Errorf("invalid backup format")
 		}
-		result[i].Link, err = url.Parse(parts[0])
+		token := &linkToken{}
+		token.Link, err = url.Parse(parts[0])
 		if err != nil {
 			return nil, err
 		}
-		result[i].Priority, err = strconv.ParseFloat(parts[1], 64)
+		token.Priority, err = strconv.ParseFloat(parts[1], 64)
 		if err != nil {
 			return nil, err
 		}
-		result[i].Depth, err = strconv.Atoi(parts[2])
+		token.Depth, err = strconv.Atoi(parts[2])
 		if err != nil {
 			return nil, err
 		}
+		result = append(result, token)
 	}
 	return result, nil
 }

@@ -34,8 +34,8 @@ func NewIndexRepository(path string, log *model.Logger, chunkSize int) (*IndexRe
 		log: log,
 		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
-		nGramIndexer: &wordChunkData{buffer: make(map[string][]string), counts: make(map[string]int)},
-		shingleIndexer: &shingleChunkData{buffer: make(map[[4]uint64][][128]uint64), counts: make(map[[4]uint64]int)},
+		nGramIndexer: &wordChunkData{buffer: make(map[string][]string), counts: make(map[string]int), incomplete: make(map[string]struct{})},
+		shingleIndexer: &shingleChunkData{buffer: make(map[[4]uint64][][128]uint64), counts: make(map[[4]uint64]int), incomplete: make(map[[4]uint64]struct{})},
 		chunkSize: chunkSize,
 	}
 	return ir, ir.UpdateChunkingCounts() // сомнительно потому что нам не нужно это прокидывать если мы не будем индексировать

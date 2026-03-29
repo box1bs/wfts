@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/dgraph-io/badger/v3"
 )
@@ -14,16 +15,30 @@ import (
 const (
 	ngKey = "ng:%s:%04d"
 	shingleKey = "shingle:%s:%04d"
+	maxRecords = 10000
+	maxIncompleteRecs = 1000
 )
 
 type wordChunkData struct {
 	buffer	map[string][]string
+	incomplete map[string]struct{}
 	counts	map[string]int
+	curBufSize int32
 }
 
 type shingleChunkData struct {
 	buffer	map[[4]uint64][][128]uint64
+	incomplete map[[4]uint64]struct{}
 	counts 	map[[4]uint64]int
+	curBufSize int32
+}
+
+func (ir *IndexRepository) makeShingleKey(sh [4]uint64) string {
+	strs := [4]string{}
+	for i := range 4 {
+		strs[i] = strconv.FormatUint(sh[i], 10)
+	}
+	return strings.Join(strs[:], ".")
 }
 
 func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
@@ -32,20 +47,29 @@ func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
 			ir.mu.Lock()
 			buf := ir.nGramIndexer.buffer[ng]
 			buf = append(buf, word)
+			atomic.AddInt32(&ir.nGramIndexer.curBufSize, 1)
 			if len(buf) >= ir.chunkSize {
-				ir.nGramIndexer.counts[ng]++
 				chId := ir.nGramIndexer.counts[ng]
+				ir.nGramIndexer.counts[ng]++
 				toFlush := make([]string, len(buf)) // чтоб не обнулялось
 				copy(toFlush, buf)
 				delete(ir.nGramIndexer.buffer, ng)
-				ir.mu.Unlock()
+				atomic.AddInt32(&ir.nGramIndexer.curBufSize, -int32(ir.chunkSize))
 
-				if err := ir.flushChunk(chId, ngKey, ng, toFlush); err != nil {
+				if err := ir.flushChunk(nil, chId, ngKey, ng, toFlush); err != nil {
+					ir.mu.Unlock()
 					return err
 				}
+				ir.mu.Unlock()
 				continue
 			}
 			ir.nGramIndexer.buffer[ng] = buf
+			if atomic.LoadInt32(&ir.nGramIndexer.curBufSize) >= maxRecords {
+				ir.mu.Unlock()
+				atomic.StoreInt32(&ir.nGramIndexer.curBufSize, 0)
+				if err := ir.FlushAll(); err != nil {return err}
+				continue
+			}
 			ir.mu.Unlock()
 		}
 	}
@@ -58,24 +82,28 @@ func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
         copy(lshKey[:], signature[i: i + 4])
 		ir.mu.Lock()
 		buf := append(ir.shingleIndexer.buffer[lshKey], signature)
+		atomic.AddInt32(&ir.shingleIndexer.curBufSize, 1)
 		if len(buf) >= ir.chunkSize {
-			ir.shingleIndexer.counts[lshKey]++
 			chId := ir.shingleIndexer.counts[lshKey]
+			ir.shingleIndexer.counts[lshKey]++
 			toFlush := make([][128]uint64, len(buf)) // чтоб не обнулялся
 			copy(toFlush, buf)
 			delete(ir.shingleIndexer.buffer, lshKey)
-			ir.mu.Unlock()
-			strs := [4]string{}
-
-			for i := range 4 {
-				strs[i] = strconv.FormatUint(lshKey[i], 10)
-			}
-			if err := ir.flushChunk(chId, shingleKey, strings.Join(strs[:], "."), toFlush); err != nil {
+			atomic.AddInt32(&ir.shingleIndexer.curBufSize, -int32(ir.chunkSize))
+			if err := ir.flushChunk(nil, chId, shingleKey, ir.makeShingleKey(lshKey), toFlush); err != nil {
+				ir.mu.Unlock()
 				return err
 			}
+			ir.mu.Unlock()
 			continue
 		}
 		ir.shingleIndexer.buffer[lshKey] = buf
+		if atomic.LoadInt32(&ir.shingleIndexer.curBufSize) >= maxRecords {
+			ir.mu.Unlock()
+			atomic.StoreInt32(&ir.shingleIndexer.curBufSize, 0)
+			if err := ir.FlushAll(); err != nil {return err}
+			continue
+		}
 		ir.mu.Unlock()
 	}
 	return nil
@@ -160,11 +188,7 @@ func (ir *IndexRepository) GetSimilarSignatures(signature [128]uint64) ([][128]u
 			alreadyInc[sign] = struct{}{}
 			result = append(result, sign)
 		}
-		strs := [4]string{}
-		for i := range 4 {
-			strs[i] = strconv.FormatUint(lshKey[i], 10)
-		}
-		prefix := []byte("shingle:" + strings.Join(strs[:], ".") + ":")
+		prefix := []byte("shingle:" + ir.makeShingleKey(lshKey) + ":")
 		if err := ir.DB.View(func(txn *badger.Txn) error {
 			it := txn.NewIterator(badger.DefaultIteratorOptions)
 			defer it.Close()
@@ -195,44 +219,215 @@ func (ir *IndexRepository) GetSimilarSignatures(signature [128]uint64) ([][128]u
 	return result, nil
 }
 
-func (ir *IndexRepository) flushChunk(id int, k, data string, buffer any) error {
-	key := fmt.Appendf(nil, k, data, id)
-	val, err := json.Marshal(buffer)
+func (ir *IndexRepository) flushChunk(txn *badger.Txn, id int, k, kPart string, data any) error {
+	key := fmt.Appendf(nil, k, kPart, id)
+	val, err := json.Marshal(data)
 	if err != nil {
 		return err
 	}
 
-	if err := ir.DB.Update(func(txn *badger.Txn) error {
-		return txn.Set(key, val)
-	}); err != nil {
-		ir.log.Errorf("error flushing chunk %v", err)
-		return err
+	if txn != nil {
+		if err := txn.Set(key, val); err != nil {
+			ir.log.Errorf("error flushing chunk %v", err)
+			return err
+		}
+	} else {
+		if err := ir.DB.Update(func(txn *badger.Txn) error {
+			return txn.Set(key, val)
+		}); err != nil {
+			ir.log.Errorf("error flushing chunk %v", err)
+			return err
+		}
 	}
 	return nil
 }
 
-func (ir *IndexRepository) FlushAll() {
+func (ir *IndexRepository) FlushAll() error {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
 	for ng, buf := range ir.nGramIndexer.buffer {
 		if len(buf) == 0 {
 			continue
 		}
+		if ir.nGramIndexer.counts[ng] >= 5 && len(ir.nGramIndexer.buffer[ng]) < ir.chunkSize / 2 {
+			ir.nGramIndexer.incomplete[ng] = struct{}{}
+		}
+		if len(ir.nGramIndexer.incomplete) >= maxIncompleteRecs {
+			if err := ir.optimizeNgramIndex(); err != nil {
+				return err
+			}
+		}
+		if err := ir.flushChunk(nil, ir.nGramIndexer.counts[ng], ngKey, ng, buf); err != nil {return err}
 		ir.nGramIndexer.counts[ng]++
-		ir.flushChunk(ir.nGramIndexer.counts[ng], ngKey, ng, buf)
+		delete(ir.nGramIndexer.buffer, ng)
 	}
 	for sh, buf := range ir.shingleIndexer.buffer {
 		if len(buf) == 0 {
 			continue
 		}
-		ir.shingleIndexer.counts[sh]++
-		strs := [4]string{}
-		for i := range 4 {
-			strs[i] = strconv.FormatUint(sh[i], 10)
+		if ir.shingleIndexer.counts[sh] >= 5 && len(ir.shingleIndexer.buffer[sh]) < ir.chunkSize / 2 {
+			ir.shingleIndexer.incomplete[sh] = struct{}{}
 		}
-		ir.flushChunk(ir.shingleIndexer.counts[sh], shingleKey, strings.Join(strs[:], "."), buf)
+		if len(ir.shingleIndexer.incomplete) >= maxIncompleteRecs {
+			if err := ir.optimizeShingleIndex(); err != nil {
+				return err
+			}
+		}
+		if err := ir.flushChunk(nil, ir.shingleIndexer.counts[sh], shingleKey, ir.makeShingleKey(sh), buf); err != nil {return err}
+		ir.shingleIndexer.counts[sh]++
+		delete(ir.shingleIndexer.buffer, sh)
 	}
-	ir.nGramIndexer.buffer = make(map[string][]string)
+	return nil
+}
+
+func (ir *IndexRepository) optimizeNgramIndex() error {
+	type mergeData struct {
+        words []string
+        keys  [][]byte
+    }
+
+	toMerge := make(map[string]*mergeData)
+	if err := ir.DB.View(func(txn *badger.Txn) error {
+		for ng := range ir.nGramIndexer.incomplete {
+			alreadyInc := map[string]struct{}{}
+			buf := make([]string, 0, 128)
+			prefixes := [][]byte{}
+
+			count := ir.nGramIndexer.counts[ng]
+			for i := min(count, 5); i > 0; i-- {
+				prefixes = append(prefixes, fmt.Appendf(nil, "ng:%s:%d", ng, count-i))
+			}
+			for _, prefix := range prefixes {
+				item, err := txn.Get(prefix)
+				if err != nil && err != badger.ErrKeyNotFound {
+					return err
+				}
+				if err == badger.ErrKeyNotFound {
+					continue
+				}
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				var words []string
+				if err := json.Unmarshal(val, &words); err != nil {
+					return err
+				}
+				for _, w := range words {
+					if _, ex := alreadyInc[w]; ex {
+						continue
+					}
+					alreadyInc[w] = struct{}{}
+					buf = append(buf, w)
+				}
+			}
+			toMerge[ng] = &mergeData{words: buf, keys: prefixes}
+		}
+		return nil
+	}); err != nil {return err}
+
+	return ir.DB.Update(func(txn *badger.Txn) error {
+		for ng, it := range toMerge {
+			chId := ir.nGramIndexer.counts[ng]
+			for _, key := range it.keys {
+				if err := txn.Delete(key); err != nil {
+					return err
+				}
+				chId--
+			}
+			bufLen := len(it.words)
+			for i := 0; i < bufLen; i += ir.chunkSize {
+				chunk := it.words[i:min(ir.chunkSize + i, bufLen)]
+				if err := ir.flushChunk(txn, chId, ngKey, ng, chunk); err != nil {
+					return err
+				}
+				chId++
+			}
+			ir.nGramIndexer.counts[ng] = chId
+			delete(ir.nGramIndexer.incomplete, ng)
+			newChunksNum := bufLen / ir.chunkSize
+			if newChunksNum > len(it.keys) {
+				panic("invariant broken: chunk overflow")
+			}
+			ir.log.Debugf("ngram index optimized %d -> %d, for '%s'", chId, ir.nGramIndexer.counts[ng], ng)
+		}
+		return nil
+	})
+}
+
+func (ir *IndexRepository) optimizeShingleIndex() error {
+	type mergeData struct {
+        shingles [][128]uint64
+        keys  [][]byte
+    }
+
+	toMerge := make(map[[4]uint64]*mergeData)
+	if err := ir.DB.View(func(txn *badger.Txn) error {
+		for sh := range ir.shingleIndexer.incomplete {
+			alreadyInc := map[[128]uint64]struct{}{}
+			buf := make([][128]uint64, 0, 128)
+			prefixes := [][]byte{}
+
+			count := ir.shingleIndexer.counts[sh]
+			for i := min(count, 5); i > 0; i-- {
+				prefixes = append(prefixes, fmt.Appendf(nil, shingleKey, ir.makeShingleKey(sh), count-i))
+			}
+			for _, prefix := range prefixes {
+				item, err := txn.Get(prefix)
+				if err != nil && err != badger.ErrKeyNotFound {
+					return err
+				}
+				if err == badger.ErrKeyNotFound {
+					continue
+				}
+				val, err := item.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				var signs [][128]uint64
+				if err := json.Unmarshal(val, &signs); err != nil {
+					return err
+				}
+				for _, sign := range signs {
+					if _, ex := alreadyInc[sign]; ex {
+						continue
+					}
+					alreadyInc[sign] = struct{}{}
+					buf = append(buf, sign)
+				}
+			}
+			toMerge[sh] = &mergeData{shingles: buf, keys: prefixes}
+		}
+		return nil
+	}); err != nil {return err}
+
+	return ir.DB.Update(func(txn *badger.Txn) error {
+		for sh, it := range toMerge {
+			chId := ir.shingleIndexer.counts[sh]
+			for _, key := range it.keys {
+				if err := txn.Delete(key); err != nil {
+					return err
+				}
+				chId--
+			}
+			bufLen := len(it.shingles)
+			for i := 0; i < bufLen; i += ir.chunkSize {
+				chunk := it.shingles[i:min(ir.chunkSize + i, bufLen)]
+				if err := ir.flushChunk(txn, chId, shingleKey, ir.makeShingleKey(sh), chunk); err != nil {
+					return err
+				}
+				chId++
+			}
+			delete(ir.shingleIndexer.incomplete, sh)
+			ir.shingleIndexer.counts[sh] = chId
+			newChunksNum := bufLen / ir.chunkSize
+			if newChunksNum > len(it.keys) {
+				panic("invariant broken: chunk overflow")
+			}
+			ir.log.Debugf("ngram index optimized %d -> %d, for '%s'", chId, ir.shingleIndexer.counts[sh], ir.makeShingleKey(sh))
+		}
+		return nil
+	})
 }
 
 func (ir * IndexRepository) UpdateChunkingCounts() error {
