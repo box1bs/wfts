@@ -335,7 +335,7 @@ func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {
 		if len(parts) != 3 {
 			return nil, fmt.Errorf("invalid backup format")
 		}
-		token := &linkToken{}
+		token := linkToken{}
 		token.Link, err = url.Parse(parts[0])
 		if err != nil {
 			return nil, err
@@ -348,7 +348,7 @@ func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, token)
+		result = append(result, &token)
 	}
 	return result, nil
 }
