@@ -87,7 +87,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		logger.Errorf("error saving document: %v", err)
 		return err
 	}
-	if err := idx.repository.IndexNGrams(allWordTokens, idx.sc.NGramCount); err != nil {
+	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil {
 		logger.Errorf("error indexing ngrams: %v", err)
 		return err
 	}
@@ -127,7 +127,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 			return nil, nil, err
 		}
 		if len(documents) == 0 && stemmed[i].Type == textHandling.WORD { // исправляем только слова
-			conds, err := idx.repository.GetWordsByNGram(words[wordPos], idx.sc.NGramCount)
+			conds, err := idx.repository.GetWordsByTGrams(words[wordPos])
 			if err != nil {
 				return nil, nil, err
 			}

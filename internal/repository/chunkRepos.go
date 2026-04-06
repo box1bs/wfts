@@ -19,7 +19,8 @@ import (
 const (
 	ngKey = "ng:%s:%04d"
 	shingleKey = "shingle:%s:%04d"
-	ngFileName = "ng%d.bin"
+	ngFileName = ".local/ngs/ng%d.bin"
+	BloomPath = ".local/bloom.bin"
 	wordKey = "word:%s"
 	seqKey = "num:%d"
 	inck = "inc:"
@@ -33,7 +34,7 @@ type BitSet struct {
 func (bs *BitSet) Add(data uint32) {
 	h1 := data * a
 	h2 := data * b
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		bit := (h1 + h2 * uint32(i)) % 512 // 0-511
 		bs.bits[bit/64] |= 1 << (bit % 64) // меняем 1 << bit % 64(0-63) бит на 1 в bit / 64(0-7) массиве
 	}
@@ -42,18 +43,13 @@ func (bs *BitSet) Add(data uint32) {
 func (bs *BitSet) Contain(data uint32) bool {
 	h1 := data * a
 	h2 := data * b
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		bit := (h1 + h2 * uint32(i)) % 512 // 0-511
 		if bs.bits[bit/64] & (1 << (bit % 64)) == 0 { // если конкретный бит не был помечен
 			return false
 		}
 	}
 	return true
-}
-
-type wordChunkData struct {
-	buffer	map[string][]string
-	counts	map[string]int
 }
 
 type ngChunkIndex struct {
@@ -89,28 +85,52 @@ func (rb *RotatingBloom) Add(trigram uint16, seq uint32) bool {
 	return true
 }
 
-func (rb *RotatingBloom) Has(trigram uint16, seq uint32) bool {
-	return rb.active[trigram].Contain(seq) || rb.standby[trigram].Contain(seq)
-}
-
 func (rb *RotatingBloom) rotate(idx uint16) {
 	rb.standby[idx] = rb.active[idx]
 	rb.active[idx] = BitSet{}
 	rb.counts[idx] = 0
 }
 
-func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
+func (ir *IndexRepository) SaveBloom() error {
+	file, err := os.OpenFile(BloomPath, os.O_CREATE | os.O_WRONLY | os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(file, binary.LittleEndian, *ir.ni.bloom); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ni *ngChunkIndex) loadBloom() error {
+	file, err := os.OpenFile(BloomPath, os.O_RDONLY, 0600)
+	if err != nil && os.IsExist(err) {
+		return err
+	} else if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	if err := binary.Read(file, binary.LittleEndian, ni.bloom); err != nil {
+		return err
+	}
+	return nil
+}
+
+func makeBiGramKey(ng string) uint16 {
+	return uint16(ng[0] - 'a') * 26 + uint16(ng[1] - 'a')
+}
+
+func (ir *IndexRepository) IndexTriGrams(words []string) error {
 	sequence, err := ir.saveOrLoadWord(words...)
 	if err != nil {
 		return err
 	}
 	for i, word := range words {
-		for _, ng := range extractNGrams(word, n) {
-			bkey := (ng[0] - 'a') * 26 + (ng[1] - 'a')
+		for _, ng := range extractTGrams(word) {
+			bkey := makeBiGramKey(ng)
 			tkey := uint16(ng[0] - 'a') * 676 + uint16(ng[1] - 'a') * 26 + uint16(ng[2] - 'a')
 			ir.ni.locks[bkey].Lock()
 			if file := ir.ni.chunks[bkey]; file == nil {
-				ngfile, err := os.OpenFile(fmt.Sprintf(ngFileName, bkey), os.O_RDWR | os.O_CREATE, 0600)
+				ngfile, err := os.OpenFile(fmt.Sprintf(ngFileName, bkey), os.O_APPEND | os.O_WRONLY | os.O_CREATE, 0600)
 				if err != nil {
 					ir.ni.locks[bkey].Unlock()
 					return err
@@ -122,7 +142,7 @@ func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
 				continue
 			}
 			data := fmt.Sprintf("%d:%d", ng[2] - 'a', sequence[i])
-			if err := binary.Write(ir.ni.chunks[bkey], binary.LittleEndian, len(data)); err != nil {
+			if err := binary.Write(ir.ni.chunks[bkey], binary.LittleEndian, uint16(len(data))); err != nil {
 				ir.ni.locks[bkey].Unlock()
 				return err
 			}
@@ -133,21 +153,25 @@ func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
 	return nil
 }
 
-func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error) {
+func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
 	result := make([]string, 0, 64)
 	alreadyInc := map[string]struct{}{}
-	ngs := extractNGrams(word, n)
+	ngs := extractTGramsByBGram(word)
 
-	for _, ng := range ngs {
-		bkey := (ng[0] - 'a') * 26 + (ng[1] - 'a')
+	for bkey, ng := range ngs {
 		ir.ni.locks[bkey].Lock()
-		if file := ir.ni.chunks[bkey]; file == nil {
+		file, err := os.OpenFile(fmt.Sprintf(ngFileName, bkey), os.O_RDONLY, 0600)
+		if err != nil && os.IsExist(err) {
+			ir.ni.locks[bkey].Unlock()
+			return nil, err
+		} else if err != nil && os.IsNotExist(err) {
 			ir.ni.locks[bkey].Unlock()
 			continue
 		}
+		defer file.Close()
 		for {
-			var len uint32
-			if err := binary.Read(ir.ni.chunks[bkey], binary.LittleEndian, &len); err != nil {
+			var len uint16
+			if err := binary.Read(file, binary.LittleEndian, &len); err != nil {
 				if err == io.EOF {
 					break
 				} else {
@@ -156,11 +180,11 @@ func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error)
 				}
 			}
 			buf := make([]byte, len)
-			if _, err := io.ReadFull(ir.ni.chunks[bkey], buf); err != nil {
+			if _, err := io.ReadFull(file, buf); err != nil {
 				ir.ni.locks[bkey].Unlock()
 				return nil, err
 			}
-			if splited := strings.Split(string(buf), ":"); slices.Contains(ngs, splited[0]) { // переделать в мапу
+			if splited := strings.Split(string(buf), ":"); slices.Contains(ng, splited[0]) {
 				if _, ex := alreadyInc[splited[1]]; ex {
 					continue
 				}
@@ -258,33 +282,6 @@ func (ir *IndexRepository) makeShingleKey(sh [4]uint64) string {
 	return strings.Join(strs[:], ".")
 }
 
-// func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
-// 	for _, word := range words {
-// 		for _, ng := range extractNGrams(word, n) {
-// 			ir.mu.Lock()
-// 			buf := ir.nGramIndexer.buffer[ng]
-// 			buf = append(buf, word)
-// 			if len(buf) >= ir.chunkSize {
-// 				chId := ir.nGramIndexer.counts[ng]
-// 				ir.nGramIndexer.counts[ng]++
-// 				toFlush := make([]string, len(buf)) // чтоб не обнулялось
-// 				copy(toFlush, buf)
-// 				delete(ir.nGramIndexer.buffer, ng)
-
-// 				if err := ir.flushChunk(nil, chId, ngKey, ng, toFlush); err != nil {
-// 					ir.mu.Unlock()
-// 					return err
-// 				}
-// 				ir.mu.Unlock()
-// 				continue
-// 			}
-// 			ir.nGramIndexer.buffer[ng] = buf
-// 			ir.mu.Unlock()
-// 		}
-// 	}
-// 	return nil
-// }
-
 func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
 	for i := 0; i <= 128 - 4; i += 4 {
 		var lshKey [4]uint64
@@ -310,64 +307,37 @@ func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
 	return nil
 }
 
-// func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error) {
-// 	result := make([]string, 0, 64)
-// 	alreadyInc := map[string]struct{}{}
-
-// 	for _, ngram := range extractNGrams(word, n) {
-// 		for _, word := range ir.nGramIndexer.buffer[ngram] { // берем из буффера
-// 			if _, ex := alreadyInc[word]; ex {
-// 				continue
-// 			}
-// 			alreadyInc[word] = struct{}{}
-// 			result = append(result, word)
-// 		}
-// 		prefix := []byte("ng:" + ngram + ":")
-// 		if err := ir.DB.View(func(txn *badger.Txn) error { // берем из памяти, технически можно это делать не через итератор, а напрямую меняя ключ в цикле от 0 до count для этой нграммы, это позволило бы лучше обрабатывать ошибочные ситуации
-// 			it := txn.NewIterator(badger.DefaultIteratorOptions)
-// 			defer it.Close()
-// 			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-// 				item := it.Item()
-// 				val, err := item.ValueCopy(nil)
-// 				if err != nil {
-// 					return err
-// 				}
-// 				var words []string
-// 				if err := json.Unmarshal(val, &words); err != nil {
-// 					return err
-// 				}
-// 				for _, w := range words {
-// 					if _, ex := alreadyInc[w]; ex {
-// 						continue
-// 					}
-// 					alreadyInc[w] = struct{}{}
-// 					result = append(result, w)
-// 				}
-// 			}
-// 			return nil
-// 		}); err != nil {
-// 			return nil, err
-// 		}
-// 	}
-
-// 	return result, nil
-// }
-
 // assuming that word contains only lower case letters
-func extractNGrams(word string, n int) []string {
+func extractTGrams(word string) []string {
 	runes := []rune(word)
 	out := make([]string, 0, 8)
 	alIn := map[string]struct{}{}
-	if len(runes) < n {
+	if len(runes) < 3 {
 		return nil
 	}
-	for i := range len(runes) - n + 1 {
-		ng := string(runes[i:i + n])
+	for i := range len(runes) - 2 {
+		ng := string(runes[i:i + 3])
 		if _, ex := alIn[ng]; ex {
 			continue
 		}
 		alIn[ng] = struct{}{}
 		out = append(out, ng)
+	}
+	return out
+}
+
+func extractTGramsByBGram(word string) map[uint16][]string {
+	runes := []rune(word)
+	out := make(map[uint16][]string)
+	alIn := map[string]struct{}{}
+	for i := range len(runes) - 2 {
+		ng := string(runes[i:i + 3])
+		if _, ex := alIn[ng]; ex {
+			continue
+		}
+		alIn[ng] = struct{}{}
+		bikey := makeBiGramKey(ng)
+		out[bikey] = append(out[bikey], ng)
 	}
 	return out
 }

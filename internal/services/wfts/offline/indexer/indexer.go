@@ -19,8 +19,8 @@ type repository interface {
 	LoadVisitedUrls(*sync.Map) error
 	SaveVisitedUrls(*sync.Map) error
 
-	IndexNGrams([]string, int) error
-	GetWordsByNGram(string, int) ([]string, error)
+	IndexTriGrams([]string) error
+	GetWordsByTGrams(string) ([]string, error)
 	IndexDocShingles([128]uint64) error
 	GetSimilarSignatures([128]uint64) ([][128]uint64, error)
 	FlushAll() error
@@ -38,6 +38,9 @@ type repository interface {
 	GetDocumentByID([32]byte) (*model.Document, error)
 	GetAllDocuments() ([]*model.Document, error)
 	GetDocumentsCount() (int, error)
+
+	UpdateIndexC() error
+	SaveBloom() error
 }
 
 type indexer struct {
@@ -63,7 +66,7 @@ func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
 		model: 		model,
 		scaler: 	scaler,
 		stemmer:   	textHandling.NewEnglishStemmer(),
-		sc: 		spellChecker.NewSpellChecker(config.MaxTypo, config.NGramCount),
+		sc: 		spellChecker.NewSpellChecker(config.MaxTypo),
 		mu: 		new(sync.RWMutex),
 		repository: repo,
 	}

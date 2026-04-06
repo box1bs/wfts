@@ -38,6 +38,9 @@ func NewIndexRepository(path string, log *model.Logger, chunkSize int) (*IndexRe
 		shingleIndexer: &shingleChunkData{buffer: make(map[[4]uint64][][128]uint64), counts: make(map[[4]uint64]int)},
 		chunkSize: chunkSize,
 	}
+	if err := ir.ni.loadBloom(); err != nil {
+		return nil, err
+	}
 	if err := ir.LoadIndexC(); err != nil {
 		return nil, err
 	}

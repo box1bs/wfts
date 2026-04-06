@@ -10,13 +10,11 @@ const ( // константы зашумленного канала
 
 type SpellChecker struct {
 	maxTypo     int
-    NGramCount  int
 }
 
-func NewSpellChecker(maxTypoLen, ngc int) *SpellChecker {
+func NewSpellChecker(maxTypoLen int) *SpellChecker {
 	return &SpellChecker{
 		maxTypo: maxTypoLen,
-        NGramCount: ngc,
 	}
 }
 
