@@ -1,6 +1,7 @@
-BINARY_NAME=wfts
 .DEFAULT_GOAL=index
-CONFIG_PATH=./configs/app_config.json
+BINARY_NAME=wfts
+CONFIG_PATH=./configs/default.json
+LOCAL_BIN_PATH=./.data/
 
 build: test
 	go build -o ./.bin/${BINARY_NAME} ./cmd/app/main.go
@@ -19,3 +20,9 @@ index-gui: build
 
 search: build
 	./.bin/${BINARY_NAME} -i --config=${CONFIG_PATH}
+
+clear:
+	rm -f ${LOCAL_BIN_PATH}index/*
+	rm -f ${LOCAL_BIN_PATH}ngs/*
+	rm -f ${LOCAL_BIN_PATH}*.bin
+	rm -f ${LOCAL_BIN_PATH}shingles/*

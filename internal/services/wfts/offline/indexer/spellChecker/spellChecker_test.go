@@ -45,7 +45,7 @@ func TestBestReplacement(t *testing.T) {
         },
     }
     
-	sc := NewSpellChecker(3, 3)
+	sc := NewSpellChecker(3)
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             testQuery := make([]string, len(tt.query))

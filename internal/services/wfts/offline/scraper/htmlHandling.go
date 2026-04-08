@@ -45,7 +45,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 		return nil, fmt.Errorf(canceled)
 	}
     if err != nil {
-		log.Errorf("error getting html: %v", err)
+		log.Errorf("url page error: %v", err)
         return nil, err
     }
 	if doc == "" {

@@ -1,166 +1,359 @@
 package repository
 
 import (
-	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
+	"io"
+	"os"
+	"slices"
+	"sync"
 	"sync/atomic"
 
 	"github.com/dgraph-io/badger/v3"
 )
 
 const (
-	ngKey = "ng:%s:%04d"
-	shingleKey = "shingle:%s:%04d"
-	maxRecords = 10000
-	maxIncompleteRecs = 1000
+	shPath = "/shingles/chunk%d.bin"
+	ngPath = "/ngs/ng%d.bin"
+	BloomPath = "/bloom.bin"
+	wordKey = "word:%s"
+	seqKey = "num:%d"
+	inck = "inc:"
+	a, b = 2654435761, 2246822519 // константы для рандомизации битов
 )
 
-type wordChunkData struct {
-	buffer	map[string][]string
-	incomplete map[string]struct{}
-	counts	map[string]int
-	curBufSize int32
+type BitSet struct {
+	bits [8]uint64 // 512 bit
 }
 
-type shingleChunkData struct {
-	buffer	map[[4]uint64][][128]uint64
-	incomplete map[[4]uint64]struct{}
-	counts 	map[[4]uint64]int
-	curBufSize int32
-}
-
-func (ir *IndexRepository) makeShingleKey(sh [4]uint64) string {
-	strs := [4]string{}
-	for i := range 4 {
-		strs[i] = strconv.FormatUint(sh[i], 10)
+func (bs *BitSet) Add(data uint32) {
+	h1 := data * a
+	h2 := data * b
+	for i := range 5 {
+		bit := (h1 + h2 * uint32(i)) % 512 // 0-511
+		bs.bits[bit/64] |= 1 << (bit % 64) // меняем 1 << bit % 64(0-63) бит на 1 в bit / 64(0-7) массиве
 	}
-	return strings.Join(strs[:], ".")
 }
 
-func (ir *IndexRepository) IndexNGrams(words []string, n int) error {
-	for _, word := range words {
-		for _, ng := range ir.extractNGrams(word, n) {
-			ir.mu.Lock()
-			buf := ir.nGramIndexer.buffer[ng]
-			buf = append(buf, word)
-			atomic.AddInt32(&ir.nGramIndexer.curBufSize, 1)
-			if len(buf) >= ir.chunkSize {
-				chId := ir.nGramIndexer.counts[ng]
-				ir.nGramIndexer.counts[ng]++
-				toFlush := make([]string, len(buf)) // чтоб не обнулялось
-				copy(toFlush, buf)
-				delete(ir.nGramIndexer.buffer, ng)
-				atomic.AddInt32(&ir.nGramIndexer.curBufSize, -int32(ir.chunkSize))
+func (bs *BitSet) Contain(data uint32) bool {
+	h1 := data * a
+	h2 := data * b
+	for i := range 5 {
+		bit := (h1 + h2 * uint32(i)) % 512 // 0-511
+		if bs.bits[bit/64] & (1 << (bit % 64)) == 0 { // если конкретный бит не был помечен
+			return false
+		}
+	}
+	return true
+}
 
-				if err := ir.flushChunk(nil, chId, ngKey, ng, toFlush); err != nil {
-					ir.mu.Unlock()
+type ngChunkIndex struct {
+	chunks 	[676]*os.File // a * 26 + b
+	locks 	[676]sync.RWMutex
+	bloom 	*RotatingBloom
+	lIdx	uint32
+}
+
+func NewWordIndex(cap uint32) *ngChunkIndex {
+	return &ngChunkIndex{
+		bloom: &RotatingBloom{cap: cap},
+	}
+}
+
+type RotatingBloom struct {
+	active, standby [17576]BitSet // a * 676 + b * 26 + c
+	counts [17576]uint32
+	cap uint32
+}
+
+func (rb *RotatingBloom) Add(trigram uint16, seq uint32) bool {
+	if rb.active[trigram].Contain(seq) || rb.standby[trigram].Contain(seq) {
+		return false
+	}
+
+	rb.active[trigram].Add(seq)
+	rb.standby[trigram].Add(seq)
+	rb.counts[trigram]++
+	if rb.counts[trigram] == rb.cap {
+		rb.rotate(trigram)
+	}
+	return true
+}
+
+func (rb *RotatingBloom) rotate(idx uint16) {
+	rb.standby[idx] = rb.active[idx]
+	rb.active[idx] = BitSet{}
+	rb.counts[idx] = 0
+}
+
+func (ir *IndexRepository) SaveBloom() error {
+	file, err := os.OpenFile(BloomPath, os.O_CREATE | os.O_WRONLY | os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	if err := binary.Write(file, binary.LittleEndian, *ir.ni.bloom); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (ni *ngChunkIndex) loadBloom() error {
+	file, err := os.OpenFile(BloomPath, os.O_RDONLY, 0600)
+	if err != nil && os.IsExist(err) {
+		return err
+	} else if err != nil && os.IsNotExist(err) {
+		return nil
+	}
+	if err := binary.Read(file, binary.LittleEndian, ni.bloom); err != nil {
+		return err
+	}
+	return nil
+}
+
+func makeBiGramKey(ng string) uint16 {
+	return uint16(ng[0] - 'a') * 26 + uint16(ng[1] - 'a')
+}
+
+func encNGData(wordId uint32, lastLet byte) uint32 {
+	return (wordId << 8) | uint32(lastLet)
+}
+
+func decNGData(data uint32) (uint32, uint8) {
+	a := data >> 8
+	b := uint8(data & 0xFF)
+	return a, b
+}
+
+func (ir *IndexRepository) IndexTriGrams(words []string) error {
+	sequence, err := ir.saveOrLoadWord(words...)
+	if err != nil {
+		return err
+	}
+	for i, word := range words {
+		for _, ng := range extractTGrams(word) {
+			bkey := makeBiGramKey(ng)
+			tkey := uint16(ng[0] - 'a') * 676 + uint16(ng[1] - 'a') * 26 + uint16(ng[2] - 'a')
+			ir.ni.locks[bkey].Lock()
+			if ir.ni.chunks[bkey] == nil {
+				ngfile, err := os.OpenFile(ir.path + fmt.Sprintf(ngPath, bkey), os.O_APPEND | os.O_WRONLY | os.O_CREATE, 0600)
+				if err != nil {
+					ir.ni.locks[bkey].Unlock()
 					return err
 				}
-				ir.mu.Unlock()
+				ir.ni.chunks[bkey] = ngfile
+			}
+			if !ir.ni.bloom.Add(tkey, sequence[i]) {
+				ir.ni.locks[bkey].Unlock()
 				continue
 			}
-			ir.nGramIndexer.buffer[ng] = buf
-			if atomic.LoadInt32(&ir.nGramIndexer.curBufSize) >= maxRecords {
-				ir.mu.Unlock()
-				atomic.StoreInt32(&ir.nGramIndexer.curBufSize, 0)
-				if err := ir.FlushAll(); err != nil {return err}
-				continue
-			}
-			ir.mu.Unlock()
-		}
-	}
-	return nil
-}
-
-func (ir *IndexRepository) IndexDocShingles(signature [128]uint64) error {
-	for i := 0; i <= 128 - 4; i += 4 {
-		var lshKey [4]uint64
-        copy(lshKey[:], signature[i: i + 4])
-		ir.mu.Lock()
-		buf := append(ir.shingleIndexer.buffer[lshKey], signature)
-		atomic.AddInt32(&ir.shingleIndexer.curBufSize, 1)
-		if len(buf) >= ir.chunkSize {
-			chId := ir.shingleIndexer.counts[lshKey]
-			ir.shingleIndexer.counts[lshKey]++
-			toFlush := make([][128]uint64, len(buf)) // чтоб не обнулялся
-			copy(toFlush, buf)
-			delete(ir.shingleIndexer.buffer, lshKey)
-			atomic.AddInt32(&ir.shingleIndexer.curBufSize, -int32(ir.chunkSize))
-			if err := ir.flushChunk(nil, chId, shingleKey, ir.makeShingleKey(lshKey), toFlush); err != nil {
-				ir.mu.Unlock()
+			if err := binary.Write(ir.ni.chunks[bkey], binary.LittleEndian, encNGData(sequence[i], ng[2])); err != nil {
+				ir.ni.locks[bkey].Unlock()
 				return err
 			}
-			ir.mu.Unlock()
-			continue
+			ir.ni.locks[bkey].Unlock()
 		}
-		ir.shingleIndexer.buffer[lshKey] = buf
-		if atomic.LoadInt32(&ir.shingleIndexer.curBufSize) >= maxRecords {
-			ir.mu.Unlock()
-			atomic.StoreInt32(&ir.shingleIndexer.curBufSize, 0)
-			if err := ir.FlushAll(); err != nil {return err}
-			continue
-		}
-		ir.mu.Unlock()
 	}
 	return nil
 }
 
-func (ir *IndexRepository) GetWordsByNGram(word string, n int) ([]string, error) {
-	result := make([]string, 0, 64)
-	alreadyInc := map[string]struct{}{}
+func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
+	result := make([]uint32, 0, 32)
+	alreadyInc := map[uint32]struct{}{}
+	ngs := extractTGramsByBGram(word)
 
-	for _, ngram := range ir.extractNGrams(word, n) {
-		for _, word := range ir.nGramIndexer.buffer[ngram] { // берем из буффера
-			if _, ex := alreadyInc[word]; ex {
-				continue
-			}
-			alreadyInc[word] = struct{}{}
-			result = append(result, word)
+	for bkey, ng := range ngs {
+		ir.ni.locks[bkey].Lock()
+		file, err := os.OpenFile(ir.path + fmt.Sprintf(ngPath, bkey), os.O_RDONLY, 0600)
+		if err != nil && os.IsExist(err) {
+			ir.ni.locks[bkey].Unlock()
+			return nil, err
+		} else if err != nil {
+			ir.ni.locks[bkey].Unlock()
+			continue
 		}
-		prefix := []byte("ng:" + ngram + ":")
-		if err := ir.DB.View(func(txn *badger.Txn) error { // берем из памяти, технически можно это делать не через итератор, а напрямую меняя ключ в цикле от 0 до count для этой нграммы, это позволило бы лучше обрабатывать ошибочные ситуации
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
-			defer it.Close()
-			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-				item := it.Item()
-				val, err := item.ValueCopy(nil)
+		defer file.Close()
+		for {
+			buf := make([]byte, 4 * 16) // 16 по uint32
+			n, err := file.Read(buf)
+			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+				ir.ni.locks[bkey].Unlock()
+				return nil, err
+			} else if n == 0 && err != nil {
+				break
+			}
+			for i := range n / 4 {
+				p := i * 4
+				data := binary.LittleEndian.Uint32(buf[p:p + 4])
+				seq, lastLatter := decNGData(data)
+				if !slices.Contains(ng, lastLatter) {
+					continue
+				}
+				if _, ex := alreadyInc[seq]; ex {
+					continue
+				}
+				alreadyInc[seq] = struct{}{}
+				result = append(result, seq)
+			}
+		}
+		ir.ni.locks[bkey].Unlock()
+	}
+
+	return ir.getWordsFromSeq(result...)
+}
+
+func (ir *IndexRepository) saveOrLoadWord(words ...string) ([]uint32, error) {
+	var idxs []uint32
+	return idxs, ir.DB.Update(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for _, word := range words {
+			if it, err := txn.Get(fmt.Appendf(nil, wordKey, word)); err != nil && err != badger.ErrKeyNotFound {
+				return err
+			} else if err == badger.ErrKeyNotFound {
+				data := [4]byte{}
+				binary.LittleEndian.PutUint32(data[:], atomic.AddUint32(&ir.ni.lIdx, 1)) // очевидно 0 будет проигнорирован
+				if err := txn.Set(fmt.Appendf(nil, wordKey, word), data[:]); err != nil {
+					return err
+				}
+				idxs = append(idxs, ir.ni.lIdx)
+			} else {
+				data, err := it.ValueCopy(nil)
 				if err != nil {
 					return err
 				}
-				var words []string
-				if err := json.Unmarshal(val, &words); err != nil {
-					return err
-				}
-				for _, w := range words {
-					if _, ex := alreadyInc[w]; ex {
-						continue
-					}
-					alreadyInc[w] = struct{}{}
-					result = append(result, w)
-				}
+				decoded := binary.LittleEndian.Uint32(data)
+				idxs = append(idxs, decoded)
 			}
-			return nil
-		}); err != nil {
-			return nil, err
 		}
-	}
-
-	return result, nil
+		return nil
+	})
 }
 
-func (ir *IndexRepository) extractNGrams(word string, n int) []string {
-	runes := []rune(strings.ToLower(word))
+func (ir *IndexRepository) getWordsFromSeq(nums ...uint32) ([]string, error) {
+	var words []string
+	return words, ir.DB.Update(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for _, id := range nums {
+			if it, err := txn.Get(fmt.Appendf(nil, seqKey, id)); err != nil && err != badger.ErrKeyNotFound {
+				return err
+			} else if err == badger.ErrKeyNotFound {
+				return fmt.Errorf("Storage internal error, invalid id: %d", id)
+			} else {
+				data, err := it.ValueCopy(nil)
+				if err != nil {
+					return err
+				}
+				words = append(words, string(data))
+			}
+		}
+		return nil
+	})
+}
+
+func (ir *IndexRepository) LoadIndexC() error {
+	return ir.DB.View(func(txn *badger.Txn) error {
+		if it, err := txn.Get([]byte(inck)); err == nil {
+			val, err := it.ValueCopy(nil)
+			if err != nil {
+				return err
+			}
+			ir.ni.lIdx = binary.LittleEndian.Uint32(val)
+		} else if err != badger.ErrKeyNotFound {
+			return err
+		}
+		return nil
+	})
+}
+
+func (ir *IndexRepository) UpdateIndexC() error {
+	return ir.DB.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(inck), binary.LittleEndian.AppendUint32(nil, ir.ni.lIdx))
+	})
+}
+
+type shingleIndex struct {
+	chunks 	[512]*os.File
+	mutexes	[512]sync.Mutex
+}
+
+func (ir *IndexRepository) IndexDocShingles(sign [128]uint64) error {
+	for i := 0; i <= 128 - 8; i += 8 {
+		var signChunk [8]uint64
+		copy(signChunk[:], sign[i:i + 8])
+		chunkKey := makeShingleKey(signChunk)
+		ir.si.mutexes[chunkKey].Lock()
+		if ir.si.chunks[chunkKey] == nil {
+			file, err := os.OpenFile(ir.path + fmt.Sprintf(shPath, chunkKey), os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0600)
+			if err != nil {
+				ir.si.mutexes[chunkKey].Unlock()
+				return err
+			}
+			ir.si.chunks[chunkKey] = file
+		}
+		var data [136]uint64
+		copy(data[:8], signChunk[:])
+		copy(data[8:], sign[:])
+		if err := binary.Write(ir.si.chunks[chunkKey], binary.LittleEndian, data); err != nil {
+			ir.si.mutexes[chunkKey].Unlock()
+			return err
+		}
+		ir.si.mutexes[chunkKey].Unlock()
+	}
+	return nil
+}
+
+func (ir *IndexRepository) GetSimilarSigns(sign [128]uint64) ([][128]uint64, error) {
+	signs := make([][128]uint64, 0)
+	for i := 0; i <= 128 - 8; i += 8 {
+		var signChunk [8]uint64
+		copy(signChunk[:], sign[i:i + 8])
+		chunkKey := makeShingleKey(signChunk)
+		ir.si.mutexes[chunkKey].Lock()
+		file, err := os.OpenFile(ir.path + fmt.Sprintf(shPath, chunkKey), os.O_RDONLY, 0600)
+		if err != nil && os.IsExist(err) {
+			ir.si.mutexes[chunkKey].Unlock()
+			return nil, err
+		} else if err != nil {
+			ir.si.mutexes[chunkKey].Unlock()
+			continue
+		}
+		defer file.Close()
+		var data [136]uint64
+		if err := binary.Read(file, binary.LittleEndian, &data); err != nil {
+			ir.si.mutexes[chunkKey].Unlock()
+			return nil, err
+		}
+		if !slices.Equal(data[:8], signChunk[:]) {
+			ir.si.mutexes[chunkKey].Unlock()
+			continue
+		}
+		ir.si.mutexes[chunkKey].Unlock()
+		var sign [128]uint64
+		copy(sign[:], data[8:])
+		signs = append(signs, sign)
+	}
+	return signs, nil
+}
+
+func makeShingleKey(sign [8]uint64) uint16 {
+	var key uint16
+	for i := range 8 {
+		key += uint16(sign[i] % 512)
+	}
+	return key % 512
+}
+
+// assuming that word contains only lower case letters
+func extractTGrams(word string) []string {
+	runes := []rune(word)
 	out := make([]string, 0, 8)
 	alIn := map[string]struct{}{}
-	if len(runes) < n {
+	if len(runes) < 3 {
 		return nil
 	}
-	for i := range len(runes) - n + 1 {
-		ng := string(runes[i:i + n])
+	for i := range len(runes) - 2 {
+		ng := string(runes[i:i + 3])
 		if _, ex := alIn[ng]; ex {
 			continue
 		}
@@ -170,359 +363,46 @@ func (ir *IndexRepository) extractNGrams(word string, n int) []string {
 	return out
 }
 
-func (ir *IndexRepository) GetSimilarSignatures(signature [128]uint64) ([][128]uint64, error) {
-	result := make([][128]uint64, 0, 16)
-	alreadyInc := map[[128]uint64]struct{}{}
-
-	for i := 0; i <= 128 - 4; i += 4 {
-		var lshKey [4]uint64
-        copy(lshKey[:], signature[i: i + 4])
-		ir.mu.Lock()
-		buf := make([][128]uint64, len(ir.shingleIndexer.buffer[lshKey]))
-        copy(buf, ir.shingleIndexer.buffer[lshKey])
-		ir.mu.Unlock()
-		for _, sign := range buf {
-			if _, ex := alreadyInc[sign]; ex {
-				continue
-			}
-			alreadyInc[sign] = struct{}{}
-			result = append(result, sign)
+func extractTGramsByBGram(word string) map[uint16][]uint8 {
+	runes := []rune(word)
+	out := make(map[uint16][]uint8)
+	alIn := map[string]struct{}{}
+	for i := range len(runes) - 2 {
+		ng := string(runes[i:i + 3])
+		if _, ex := alIn[ng]; ex {
+			continue
 		}
-		prefix := []byte("shingle:" + ir.makeShingleKey(lshKey) + ":")
-		if err := ir.DB.View(func(txn *badger.Txn) error {
-			it := txn.NewIterator(badger.DefaultIteratorOptions)
-			defer it.Close()
-			for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-				item := it.Item()
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
-				}
-				var signatures [][128]uint64
-				if err := json.Unmarshal(val, &signatures); err != nil {
-					return err
-				}
-				for _, sign := range signatures {
-					if _, ex := alreadyInc[sign]; ex {
-						continue
-					}
-					alreadyInc[sign] = struct{}{}
-					result = append(result, sign)
-				}
-			}
-			return nil
-		}); err != nil {
-			return nil, err
-		}
+		alIn[ng] = struct{}{}
+		bikey := makeBiGramKey(ng)
+		out[bikey] = append(out[bikey], ng[2])
 	}
-
-	return result, nil
+	return out
 }
 
-func (ir *IndexRepository) flushChunk(txn *badger.Txn, id int, k, kPart string, data any) error {
-	key := fmt.Appendf(nil, k, kPart, id)
-	val, err := json.Marshal(data)
+func (ir *IndexRepository) SaveSaltArrays(a, b [128]uint64) error {
+	var data [256]uint64
+	copy(data[:128], a[:])
+	copy(data[128:], b[:])
+	file, err := os.OpenFile(ir.path + "/salt.bin", os.O_CREATE | os.O_TRUNC | os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-
-	if txn != nil {
-		if err := txn.Set(key, val); err != nil {
-			ir.log.Errorf("error flushing chunk %v", err)
-			return err
-		}
-	} else {
-		if err := ir.DB.Update(func(txn *badger.Txn) error {
-			return txn.Set(key, val)
-		}); err != nil {
-			ir.log.Errorf("error flushing chunk %v", err)
-			return err
-		}
-	}
-	return nil
+	defer file.Close()
+	return binary.Write(file, binary.LittleEndian, data)
 }
 
-func (ir *IndexRepository) FlushAll() error {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
-	for ng, buf := range ir.nGramIndexer.buffer {
-		if len(buf) == 0 {
-			continue
-		}
-		if ir.nGramIndexer.counts[ng] >= 5 && len(ir.nGramIndexer.buffer[ng]) < ir.chunkSize / 2 {
-			ir.nGramIndexer.incomplete[ng] = struct{}{}
-		}
-		if len(ir.nGramIndexer.incomplete) >= maxIncompleteRecs {
-			if err := ir.optimizeNgramIndex(); err != nil {
-				return err
-			}
-		}
-		if err := ir.flushChunk(nil, ir.nGramIndexer.counts[ng], ngKey, ng, buf); err != nil {return err}
-		ir.nGramIndexer.counts[ng]++
-		delete(ir.nGramIndexer.buffer, ng)
+func (ir *IndexRepository) UploadSaltArrays() (*[128]uint64, *[128]uint64, error) {
+	file, err := os.OpenFile(ir.path + "/salt.bin", os.O_RDONLY, 0600)
+	if err != nil && os.IsExist(err) {
+		return nil, nil, err
+	} else if err != nil {
+		return nil, nil, nil
 	}
-	for sh, buf := range ir.shingleIndexer.buffer {
-		if len(buf) == 0 {
-			continue
-		}
-		if ir.shingleIndexer.counts[sh] >= 5 && len(ir.shingleIndexer.buffer[sh]) < ir.chunkSize / 2 {
-			ir.shingleIndexer.incomplete[sh] = struct{}{}
-		}
-		if len(ir.shingleIndexer.incomplete) >= maxIncompleteRecs {
-			if err := ir.optimizeShingleIndex(); err != nil {
-				return err
-			}
-		}
-		if err := ir.flushChunk(nil, ir.shingleIndexer.counts[sh], shingleKey, ir.makeShingleKey(sh), buf); err != nil {return err}
-		ir.shingleIndexer.counts[sh]++
-		delete(ir.shingleIndexer.buffer, sh)
-	}
-	return nil
-}
-
-func (ir *IndexRepository) optimizeNgramIndex() error {
-	type mergeData struct {
-        words []string
-        keys  [][]byte
-    }
-
-	toMerge := make(map[string]*mergeData)
-	if err := ir.DB.View(func(txn *badger.Txn) error {
-		for ng := range ir.nGramIndexer.incomplete {
-			alreadyInc := map[string]struct{}{}
-			buf := make([]string, 0, 128)
-			prefixes := [][]byte{}
-
-			count := ir.nGramIndexer.counts[ng]
-			for i := min(count, 5); i > 0; i-- {
-				prefixes = append(prefixes, fmt.Appendf(nil, "ng:%s:%d", ng, count-i))
-			}
-			for _, prefix := range prefixes {
-				item, err := txn.Get(prefix)
-				if err != nil && err != badger.ErrKeyNotFound {
-					return err
-				}
-				if err == badger.ErrKeyNotFound {
-					continue
-				}
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
-				}
-				var words []string
-				if err := json.Unmarshal(val, &words); err != nil {
-					return err
-				}
-				for _, w := range words {
-					if _, ex := alreadyInc[w]; ex {
-						continue
-					}
-					alreadyInc[w] = struct{}{}
-					buf = append(buf, w)
-				}
-			}
-			toMerge[ng] = &mergeData{words: buf, keys: prefixes}
-		}
-		return nil
-	}); err != nil {return err}
-
-	return ir.DB.Update(func(txn *badger.Txn) error {
-		for ng, it := range toMerge {
-			chId := ir.nGramIndexer.counts[ng]
-			for _, key := range it.keys {
-				if err := txn.Delete(key); err != nil {
-					return err
-				}
-				chId--
-			}
-			bufLen := len(it.words)
-			for i := 0; i < bufLen; i += ir.chunkSize {
-				chunk := it.words[i:min(ir.chunkSize + i, bufLen)]
-				if err := ir.flushChunk(txn, chId, ngKey, ng, chunk); err != nil {
-					return err
-				}
-				chId++
-			}
-			ir.nGramIndexer.counts[ng] = chId
-			delete(ir.nGramIndexer.incomplete, ng)
-			newChunksNum := bufLen / ir.chunkSize
-			if newChunksNum > len(it.keys) {
-				panic("invariant broken: chunk overflow")
-			}
-			ir.log.Debugf("ngram index optimized %d -> %d, for '%s'", chId, ir.nGramIndexer.counts[ng], ng)
-		}
-		return nil
-	})
-}
-
-func (ir *IndexRepository) optimizeShingleIndex() error {
-	type mergeData struct {
-        shingles [][128]uint64
-        keys  [][]byte
-    }
-
-	toMerge := make(map[[4]uint64]*mergeData)
-	if err := ir.DB.View(func(txn *badger.Txn) error {
-		for sh := range ir.shingleIndexer.incomplete {
-			alreadyInc := map[[128]uint64]struct{}{}
-			buf := make([][128]uint64, 0, 128)
-			prefixes := [][]byte{}
-
-			count := ir.shingleIndexer.counts[sh]
-			for i := min(count, 5); i > 0; i-- {
-				prefixes = append(prefixes, fmt.Appendf(nil, shingleKey, ir.makeShingleKey(sh), count-i))
-			}
-			for _, prefix := range prefixes {
-				item, err := txn.Get(prefix)
-				if err != nil && err != badger.ErrKeyNotFound {
-					return err
-				}
-				if err == badger.ErrKeyNotFound {
-					continue
-				}
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
-				}
-				var signs [][128]uint64
-				if err := json.Unmarshal(val, &signs); err != nil {
-					return err
-				}
-				for _, sign := range signs {
-					if _, ex := alreadyInc[sign]; ex {
-						continue
-					}
-					alreadyInc[sign] = struct{}{}
-					buf = append(buf, sign)
-				}
-			}
-			toMerge[sh] = &mergeData{shingles: buf, keys: prefixes}
-		}
-		return nil
-	}); err != nil {return err}
-
-	return ir.DB.Update(func(txn *badger.Txn) error {
-		for sh, it := range toMerge {
-			chId := ir.shingleIndexer.counts[sh]
-			for _, key := range it.keys {
-				if err := txn.Delete(key); err != nil {
-					return err
-				}
-				chId--
-			}
-			bufLen := len(it.shingles)
-			for i := 0; i < bufLen; i += ir.chunkSize {
-				chunk := it.shingles[i:min(ir.chunkSize + i, bufLen)]
-				if err := ir.flushChunk(txn, chId, shingleKey, ir.makeShingleKey(sh), chunk); err != nil {
-					return err
-				}
-				chId++
-			}
-			delete(ir.shingleIndexer.incomplete, sh)
-			ir.shingleIndexer.counts[sh] = chId
-			newChunksNum := bufLen / ir.chunkSize
-			if newChunksNum > len(it.keys) {
-				panic("invariant broken: chunk overflow")
-			}
-			ir.log.Debugf("ngram index optimized %d -> %d, for '%s'", chId, ir.shingleIndexer.counts[sh], ir.makeShingleKey(sh))
-		}
-		return nil
-	})
-}
-
-func (ir * IndexRepository) UpdateChunkingCounts() error {
-	prefixN := []byte("ng:")
-	if err := ir.DB.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		ir.mu.Lock()
-		defer ir.mu.Unlock()
-		for it.Seek(prefixN); it.ValidForPrefix(prefixN); it.Next() {
-			item := it.Item()
-			ngramButch := strings.Split(strings.TrimPrefix(string(item.Key()), string(prefixN)), ":")
-			if len(ngramButch) < 2 {
-				return fmt.Errorf("invalid data chunk")
-			}
-			lnum, err := strconv.Atoi(ngramButch[1])
-			if err != nil {
-				return err
-			}
-			ir.nGramIndexer.counts[ngramButch[0]] = max(ir.nGramIndexer.counts[ngramButch[0]], lnum)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	prefixS := []byte("shingle:")
-	return ir.DB.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		ir.mu.Lock()
-		defer ir.mu.Unlock()
-		for it.Seek(prefixS); it.ValidForPrefix(prefixS); it.Next() {
-			item := it.Item()
-			shingleButch := strings.Split(strings.TrimPrefix(string(item.Key()), string(prefixS)), ":")
-			if len(shingleButch) < 2 {
-				return fmt.Errorf("invalid data chunk")
-			}
-			num, err := strconv.Atoi(shingleButch[1])
-			if err != nil {
-				return err
-			}
-			lshKey := [4]uint64{}
-			rawKeys := strings.Split(shingleButch[0], ".")
-			if len(rawKeys) != 4 {
-				return fmt.Errorf("invalid key size")
-			}
-			for i := range 4 {
-				mHash, err := strconv.Atoi(rawKeys[i])
-				if err != nil {
-					return err
-				}
-				lshKey[i] = uint64(mHash)
-			}
-			ir.shingleIndexer.counts[lshKey] = max(ir.shingleIndexer.counts[lshKey], num)
-		}
-		return nil
-	})
-}
-
-const saltKey = "salt:%s%s"
-
-func (ir *IndexRepository) SaveSaltArrays(a, b [128]uint64) error {
-	abuf := bytes.NewBuffer(nil)
-	if err := binary.Write(abuf, binary.LittleEndian, a); err != nil {
-		return err
-	}
-	bbuf := bytes.NewBuffer(nil)
-	if err := binary.Write(bbuf, binary.LittleEndian, b); err != nil {
-		return err
-	}
-	return ir.DB.Update(func(txn *badger.Txn) error {
-		return txn.Set(fmt.Appendf(nil, saltKey, abuf.Bytes(), bbuf.Bytes()), nil)
-	})
-}
-
-func (ir *IndexRepository) UploadSaltArrays() ([128]uint64, [128]uint64, error) {
-	a, b := [128]uint64{}, [128]uint64{}
-	return a, b, ir.DB.View(func(txn *badger.Txn) error {
-		iter := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer iter.Close()
-		if iter.Seek([]byte("salt:")); iter.ValidForPrefix([]byte("salt:")) {
-			key := iter.Item().Key()
-			i := len("salt:")
-			if l := 128 * 2 * 8 + i; len(key) != l {
-				return fmt.Errorf("invalid key len: %d, needed L: %d", len(key), l)
-			}
-			partA := key[i:i + 128 * 8]
-			partB := key[i + 128 * 8:]
-			for i := range 128 {
-				start := i * 8
-				a[i] = binary.LittleEndian.Uint64(partA[start:start + 8])
-				b[i] = binary.LittleEndian.Uint64(partB[start:start + 8])
-			}
-			return nil
-		}
-		return badger.ErrKeyNotFound
-	})
+	defer file.Close()
+	var data [256]uint64
+	binary.Read(file, binary.LittleEndian, &data)
+	var a, b [128]uint64
+	copy(a[:], data[:128])
+	copy(b[:], data[128:])
+	return &a, &b, nil
 }

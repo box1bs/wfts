@@ -21,7 +21,7 @@ import (
 
 func main() {
 	var (
-		configFile = flag.String("config", "configs/app_config.json", "Path to configuration file")
+		configFile = flag.String("config", "default.json", "Path to configuration file")
 		indexFlag = flag.Bool("i", false, "disable indexing")
 		interfaceFlag = flag.Bool("gui", false, "use terminal UI")
 	)
@@ -51,7 +51,7 @@ func main() {
 		Level: slog.LevelDebug,
 	})))
 
-	ir, err := repository.NewIndexRepository(cfg.IndexPath, log, cfg.ChunkSize)
+	ir, err := repository.NewIndexRepository(cfg.IndexPath, log)
 	if err != nil {
 		panic(err)
 	}
@@ -119,7 +119,7 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	log := model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
 	})))
-	ir, err := repository.NewIndexRepository(cfg.IndexPath, log, cfg.ChunkSize)
+	ir, err := repository.NewIndexRepository(cfg.IndexPath, log)
 	if err != nil {
 		panic(err)
 	}

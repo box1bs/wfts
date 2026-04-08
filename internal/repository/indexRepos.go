@@ -18,13 +18,13 @@ type IndexRepository struct {
 	log 			*model.Logger
 	wg 				*sync.WaitGroup
 	mu 				*sync.Mutex
-	nGramIndexer	*wordChunkData
-	shingleIndexer	*shingleChunkData
-	chunkSize 		int
+	ni				*ngChunkIndex
+	si				*shingleIndex
+	path 			string
 }
 
-func NewIndexRepository(path string, log *model.Logger, chunkSize int) (*IndexRepository, error) {
-	db, err := badger.Open(badger.DefaultOptions(path).WithLoggingLevel(badger.WARNING))
+func NewIndexRepository(path string, log *model.Logger) (*IndexRepository, error) {
+	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.WARNING))
 	if err != nil {
 		return nil, err
 	}
@@ -34,11 +34,14 @@ func NewIndexRepository(path string, log *model.Logger, chunkSize int) (*IndexRe
 		log: log,
 		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
-		nGramIndexer: &wordChunkData{buffer: make(map[string][]string), counts: make(map[string]int), incomplete: make(map[string]struct{})},
-		shingleIndexer: &shingleChunkData{buffer: make(map[[4]uint64][][128]uint64), counts: make(map[[4]uint64]int), incomplete: make(map[[4]uint64]struct{})},
-		chunkSize: chunkSize,
+		ni: NewWordIndex(58),
+		si: &shingleIndex{},
+		path: strings.TrimLeft(path, "/"),
 	}
-	return ir, ir.UpdateChunkingCounts() // сомнительно потому что нам не нужно это прокидывать если мы не будем индексировать
+	if err := ir.ni.loadBloom(); err != nil {
+		return nil, err
+	}
+	return ir, ir.LoadIndexC() // сомнительно потому что нам не нужно это прокидывать если мы не будем индексировать
 }
 
 func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
@@ -206,9 +209,7 @@ func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
 }
 
 func encCount(n int) []byte {
-	buf := make([]byte, 4)
-	binary.BigEndian.PutUint32(buf, uint32(n))
-	return buf
+	return binary.BigEndian.AppendUint32(nil, uint32(n))
 }
 
 func decCount(c []byte) int {

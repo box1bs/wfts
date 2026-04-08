@@ -73,7 +73,7 @@ func compileIPV4Regex() *regexp.Regexp {
 }
 
 func getRuneType(r rune) tokenType {
-	if unicode.IsLetter(r) {
+	if r >= 'a' && r <= 'z' { // загадка от жака фреско, зачем считать любое слово полезным, если алгоритмы подстроены только под английский язык
 		return WORD
 	}
 	if unicode.IsDigit(r) {
