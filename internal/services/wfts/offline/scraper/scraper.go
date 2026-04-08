@@ -30,7 +30,6 @@ type indexer interface {
 	SaveVisitedUrls(*sync.Map) error
 	LoadVisitedUrls(*sync.Map) error
 	SaveHashArrays() error
-	FlushAll() error
 	UpdateIndexC() error
 	SaveBloom() error
 }
@@ -106,7 +105,6 @@ func (ws *WebScraper) Run() error {
 	}
 	defer ws.SaveVisitedUrls(ws.visited)
 	defer ws.SaveHashArrays()
-	defer ws.FlushAll()
 	defer ws.UpdateIndexC()
 	defer ws.SaveBloom()
 
@@ -208,9 +206,10 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 
 	if len(links) == 0 && (err == nil || err.Error() != BaseXMLPageError) {
 		if prevDepth, loaded := ws.visited.LoadOrStore(normalized, curLink.Depth); loaded && prevDepth.(int) <= curLink.Depth {
-			return model.Error
+			return model.Done
 		} else if loaded {
 			load = true
+			ws.visited.Swap(normalized, curLink.Depth)
 			if v := ws.lru.Get(hashed); v != nil {
 				links = v.([]*linkToken)
 			} else {

@@ -22,14 +22,13 @@ type repository interface {
 	IndexTriGrams([]string) error
 	GetWordsByTGrams(string) ([]string, error)
 	IndexDocShingles([128]uint64) error
-	GetSimilarSignatures([128]uint64) ([][128]uint64, error)
-	FlushAll() error
+	GetSimilarSigns([128]uint64) ([][128]uint64, error)
 
 	UpdateBiFreq(map[[2]uint64]int) error
 	GetFreq(uint64, uint64) (int, error)
 
 	SaveSaltArrays([128]uint64, [128]uint64) error
-	UploadSaltArrays() ([128]uint64, [128]uint64, error)
+	UploadSaltArrays() (*[128]uint64, *[128]uint64, error)
 
 	IndexDocumentWords([32]byte, map[string]int, map[string][]model.Position) error
 	GetDocumentsByWord(string) (map[[32]byte]model.WordCountAndPositions, error)
@@ -70,17 +69,17 @@ func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
 		mu: 		new(sync.RWMutex),
 		repository: repo,
 	}
-	if a, b, err := idx.UploadSaltArrays(); err != nil && err.Error() != "Key not found" {
+	if a, b, err := idx.UploadSaltArrays(); err != nil {
 		return nil, err
-	} else if err != nil && err.Error() == "Key not found" {
+	} else if a == nil {
 		if c, err := idx.GetDocumentsCount(); err != nil {
 			return nil, err
 		} else if c != 0 {
 			return nil, fmt.Errorf("index isn't empty, but salt arrays is")
 		}
-		idx.minHash = NewHasher(a, b, true) // пересоздаем
+		idx.minHash = NewHasher([128]uint64{}, [128]uint64{}, true) // пересоздаем
 	} else {
-		idx.minHash = NewHasher(a, b, false) // просто получаем структуру
+		idx.minHash = NewHasher(*a, *b, false) // просто получаем структуру
 	}
 	return idx, nil
 }

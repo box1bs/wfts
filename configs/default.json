@@ -36,10 +36,9 @@
     ],
     "info_log_path" : "",
     "backup_path" : "./.scratches",
-    "index_path" : "./.data/index",
+    "index_path" : "./.data",
     "worker_count" : 40,
     "max_depth_crawl" : 8,
     "max_typo" : 3,
-    "chunk_size" : 75,
     "only_same_domain" : false
 }

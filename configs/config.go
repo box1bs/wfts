@@ -13,7 +13,6 @@ type ConfigData struct {
 	WorkersCount   			int      	`json:"worker_count" validate:"min=50,max=2000"`
 	MaxDepth       			int      	`json:"max_depth_crawl" validate:"min=1,max=10"`
 	MaxTypo	  				int      	`json:"max_typo" validate:"min=1,max=4"`
-	ChunkSize 				int 		`json:"chunk_size" validate:"min=20,max=500"`
 	OnlySameDomain 			bool     	`json:"only_same_domain"`
 }
 

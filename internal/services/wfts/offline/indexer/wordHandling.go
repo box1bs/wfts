@@ -58,7 +58,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	sim := 1.0
 	if l := len(allWordTokens); !skipIndexAdding && l > 4 {
 		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
-		conds, err := idx.repository.GetSimilarSignatures(sign)
+		conds, err := idx.repository.GetSimilarSigns(sign)
 		if err != nil {
 			return err
 		}
