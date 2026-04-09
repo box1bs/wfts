@@ -296,7 +296,7 @@ func (ir *IndexRepository) IndexDocShingles(sign [128]uint64) error {
 		var data [136]uint64
 		copy(data[:8], signChunk[:])
 		copy(data[8:], sign[:])
-		if err := binary.Write(ir.si.chunks[chunkKey], binary.LittleEndian, data); err != nil {
+		if _, err := ir.si.chunks[chunkKey].Write(unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), 136 * 8)); err != nil {
 			ir.si.mutexes[chunkKey].Unlock()
 			return err
 		}
@@ -321,19 +321,29 @@ func (ir *IndexRepository) GetSimilarSigns(sign [128]uint64) ([][128]uint64, err
 			continue
 		}
 		defer file.Close()
-		var data [136]uint64
-		if err := binary.Read(file, binary.LittleEndian, &data); err != nil {
-			ir.si.mutexes[chunkKey].Unlock()
-			return nil, err
-		}
-		if !slices.Equal(data[:8], signChunk[:]) {
-			ir.si.mutexes[chunkKey].Unlock()
-			continue
+		for {
+			var key [8]uint64
+			if _, err := io.ReadFull(ir.si.chunks[chunkKey], unsafe.Slice((*byte)(unsafe.Pointer(&key[0])), 8 * 8)); err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+				ir.si.mutexes[chunkKey].Unlock()
+				return nil, err
+			} else if err != nil {
+				break
+			}
+			if key != signChunk {
+				if _, err := ir.si.chunks[chunkKey].Seek(128 * 8, io.SeekCurrent); err != nil { // пропускаем sign, чтобы проверить ключ следующего
+					ir.si.mutexes[chunkKey].Unlock()
+					return nil, err
+				}
+				continue
+			}
+			var sign [128]uint64
+			if _, err := io.ReadFull(ir.si.chunks[chunkKey], unsafe.Slice((*byte)(unsafe.Pointer(&sign[0])), 128 * 8)); err != nil {
+				ir.si.mutexes[chunkKey].Unlock()
+				return nil, err
+			}
+			signs = append(signs, sign)
 		}
 		ir.si.mutexes[chunkKey].Unlock()
-		var sign [128]uint64
-		copy(sign[:], data[8:])
-		signs = append(signs, sign)
 	}
 	return signs, nil
 }
