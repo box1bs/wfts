@@ -26,3 +26,6 @@ clear:
 	rm -f ${LOCAL_BIN_PATH}ngs/*
 	rm -f ${LOCAL_BIN_PATH}*.bin
 	rm -f ${LOCAL_BIN_PATH}shingles/*
+
+cleard:
+	rm -rf .data
