@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -36,9 +38,15 @@ func NewIndexRepository(path string, log *model.Logger) (*IndexRepository, error
 		mu: new(sync.Mutex),
 		ni: NewWordIndex(58),
 		si: &shingleIndex{},
-		path: strings.TrimLeft(path, "/"),
+		path: path,
 	}
-	if err := ir.ni.loadBloom(); err != nil {
+	if err := os.MkdirAll(filepath.Join(path, "/ngs"), 0755); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Join(path, "/shingles"), 0755); err != nil {
+		return nil, err
+	}
+	if err := ir.ni.loadBloom(path); err != nil {
 		return nil, err
 	}
 	return ir, ir.LoadIndexC() // сомнительно потому что нам не нужно это прокидывать если мы не будем индексировать

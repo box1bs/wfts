@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	"github.com/dgraph-io/badger/v3"
 )
@@ -87,7 +89,7 @@ func (rb *RotatingBloom) rotate(idx uint16) {
 }
 
 func (ir *IndexRepository) SaveBloom() error {
-	file, err := os.OpenFile(BloomPath, os.O_CREATE | os.O_WRONLY | os.O_TRUNC, 0600)
+	file, err := os.OpenFile(filepath.Join(ir.path, BloomPath), os.O_CREATE | os.O_WRONLY | os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
@@ -97,11 +99,11 @@ func (ir *IndexRepository) SaveBloom() error {
 	return nil
 }
 
-func (ni *ngChunkIndex) loadBloom() error {
-	file, err := os.OpenFile(BloomPath, os.O_RDONLY, 0600)
+func (ni *ngChunkIndex) loadBloom(path string) error {
+	file, err := os.OpenFile(filepath.Join(path, BloomPath), os.O_RDONLY, 0600)
 	if err != nil && os.IsExist(err) {
 		return err
-	} else if err != nil && os.IsNotExist(err) {
+	} else if err != nil {
 		return nil
 	}
 	if err := binary.Read(file, binary.LittleEndian, ni.bloom); err != nil {
@@ -135,7 +137,7 @@ func (ir *IndexRepository) IndexTriGrams(words []string) error {
 			tkey := uint16(ng[0] - 'a') * 676 + uint16(ng[1] - 'a') * 26 + uint16(ng[2] - 'a')
 			ir.ni.locks[bkey].Lock()
 			if ir.ni.chunks[bkey] == nil {
-				ngfile, err := os.OpenFile(ir.path + fmt.Sprintf(ngPath, bkey), os.O_APPEND | os.O_WRONLY | os.O_CREATE, 0600)
+				ngfile, err := os.OpenFile(filepath.Join(ir.path, fmt.Sprintf(ngPath, bkey)), os.O_APPEND | os.O_WRONLY | os.O_CREATE, 0600)
 				if err != nil {
 					ir.ni.locks[bkey].Unlock()
 					return err
@@ -163,7 +165,7 @@ func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
 
 	for bkey, ng := range ngs {
 		ir.ni.locks[bkey].Lock()
-		file, err := os.OpenFile(ir.path + fmt.Sprintf(ngPath, bkey), os.O_RDONLY, 0600)
+		file, err := os.OpenFile(filepath.Join(ir.path, fmt.Sprintf(ngPath, bkey)), os.O_RDONLY, 0600)
 		if err != nil && os.IsExist(err) {
 			ir.ni.locks[bkey].Unlock()
 			return nil, err
@@ -284,7 +286,7 @@ func (ir *IndexRepository) IndexDocShingles(sign [128]uint64) error {
 		chunkKey := makeShingleKey(signChunk)
 		ir.si.mutexes[chunkKey].Lock()
 		if ir.si.chunks[chunkKey] == nil {
-			file, err := os.OpenFile(ir.path + fmt.Sprintf(shPath, chunkKey), os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0600)
+			file, err := os.OpenFile(filepath.Join(ir.path, fmt.Sprintf(shPath, chunkKey)), os.O_CREATE | os.O_WRONLY | os.O_APPEND, 0600)
 			if err != nil {
 				ir.si.mutexes[chunkKey].Unlock()
 				return err
@@ -310,7 +312,7 @@ func (ir *IndexRepository) GetSimilarSigns(sign [128]uint64) ([][128]uint64, err
 		copy(signChunk[:], sign[i:i + 8])
 		chunkKey := makeShingleKey(signChunk)
 		ir.si.mutexes[chunkKey].Lock()
-		file, err := os.OpenFile(ir.path + fmt.Sprintf(shPath, chunkKey), os.O_RDONLY, 0600)
+		file, err := os.OpenFile(filepath.Join(ir.path, fmt.Sprintf(shPath, chunkKey)), os.O_RDONLY, 0600)
 		if err != nil && os.IsExist(err) {
 			ir.si.mutexes[chunkKey].Unlock()
 			return nil, err
@@ -383,26 +385,31 @@ func (ir *IndexRepository) SaveSaltArrays(a, b [128]uint64) error {
 	var data [256]uint64
 	copy(data[:128], a[:])
 	copy(data[128:], b[:])
-	file, err := os.OpenFile(ir.path + "/salt.bin", os.O_CREATE | os.O_TRUNC | os.O_WRONLY, 0600)
+	file, err := os.OpenFile(filepath.Join(ir.path, "/salt.bin"), os.O_CREATE | os.O_TRUNC | os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	return binary.Write(file, binary.LittleEndian, data)
+	_, err = file.Write(
+		unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), 256 * 8),
+	)
+	return err
 }
 
 func (ir *IndexRepository) UploadSaltArrays() (*[128]uint64, *[128]uint64, error) {
-	file, err := os.OpenFile(ir.path + "/salt.bin", os.O_RDONLY, 0600)
+	file, err := os.OpenFile(filepath.Join(ir.path, "/salt.bin"), os.O_RDONLY, 0600)
 	if err != nil && os.IsExist(err) {
 		return nil, nil, err
 	} else if err != nil {
 		return nil, nil, nil
 	}
 	defer file.Close()
-	var data [256]uint64
-	binary.Read(file, binary.LittleEndian, &data)
 	var a, b [128]uint64
-	copy(a[:], data[:128])
-	copy(b[:], data[128:])
+	if _, err = io.ReadFull(file, unsafe.Slice((*byte)(unsafe.Pointer(&a[0])), 128 * 8)); err != nil {
+		return nil, nil, err
+	}
+	if _, err = io.ReadFull(file, unsafe.Slice((*byte)(unsafe.Pointer(&b[0])), 128 * 8)); err != nil {
+		return nil, nil, err
+	}
 	return &a, &b, nil
 }

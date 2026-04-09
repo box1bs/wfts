@@ -269,7 +269,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 		if link.SameDomain {
 			link.Priority *= 2
 		}
-		link.Priority = link.Priority / (float64(curLink.Depth) + 1) * curLink.Priority * math.Exp(-0.6*float64(visPenalty))
+		link.Priority = link.Priority / (float64(curLink.Depth) + 1) * (curLink.Priority * 10) * math.Exp(-0.6*float64(visPenalty))
 
 		ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
@@ -286,7 +286,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 			defer cancel()
 			return ws.ScrapeWithContext(c, link)
 		},
-			Priority:   curLink.Priority,
+			Priority:   link.Priority,
 			CrawlToken: link,
 		})
 	}
