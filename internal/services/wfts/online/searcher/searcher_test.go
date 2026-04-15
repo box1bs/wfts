@@ -26,6 +26,16 @@ func TestGetMinQueryDistInDoc(t *testing.T) {
             expected: 15,
         },
         {
+            name:     "missing first word",
+            positions: [][]model.Position{
+                {},
+                {{I: 15}, {I: 25}},
+                {{I: 35}},
+            },
+            lenQuery: 3,
+            expected: 10 + 1 * a,
+        },
+        {
             name:     "empty positions list",
             positions: [][]model.Position{
                 {},
@@ -49,7 +59,7 @@ func TestGetMinQueryDistInDoc(t *testing.T) {
                 {{I: 5}},
             },
             lenQuery: 2,
-            expected: math.MaxInt,
+            expected: a * 1,
         },
         {
             name:     "multiple valid sequences",
@@ -65,10 +75,10 @@ func TestGetMinQueryDistInDoc(t *testing.T) {
             name:     "binary search boundary",
             positions: [][]model.Position{
                 {{I: 100}},
-                {{I: 50}, {I: 150}, {I: 200}},
+                {{I: 30}, {I: 140}, {I: 200}},
             },
             lenQuery: 2,
-            expected: 50,
+            expected: 40,
         },
     }
     

@@ -70,10 +70,12 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 
 	idf := make([]float64, queryLen)
 	docs := make(map[[32]byte]*model.Document)
+	done := make(chan struct{})
 	go func() {
 		for doc := range resChan {
 			result = append(result, doc)
 		}
+		done<-struct{}{}
 	}()
 	for i := range words {
 		idf[i] = math.Log(float64(length) / float64(len(index[i]) + 1))
@@ -89,6 +91,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 		}
 	}
 	close(resChan)
+	<-done
 
 	paddingMask := []model.Position{}
 	for id, doc := range docs {
@@ -117,7 +120,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 			}
 		}
 		rank[id] = r
-		log.Infof("doc=%s tokens=%d tfidf=%.6f len_norm=%.2f\n", 
+		log.Infof("doc=%s tokens=%d tfidf=%.6f len_norm=%.2f", 
         doc.URL, doc.TokenCount, r.Tf_Idf, float64(doc.TokenCount) / avgLen)
 	}
 	

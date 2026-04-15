@@ -37,9 +37,6 @@ type repository interface {
 	GetDocumentByID([32]byte) (*model.Document, error)
 	GetAllDocuments() ([]*model.Document, error)
 	GetDocumentsCount() (int, error)
-
-	UpdateIndexC() error
-	SaveBloom() error
 }
 
 type indexer struct {
@@ -102,5 +99,5 @@ func (idx *indexer) GetAVGLen() (float64, error) {
 		tokens += doc.TokenCount
 	}
 
-	return float64(tokens) / (float64(len(docs)) + 1), nil
+	return float64(tokens) / (float64(len(docs))), nil
 }

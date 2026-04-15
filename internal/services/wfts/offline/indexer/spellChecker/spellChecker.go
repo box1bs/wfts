@@ -1,6 +1,9 @@
 package spellChecker
 
-import "math"
+import (
+	"fmt"
+	"math"
+)
 
 const ( // константы зашумленного канала
     a = 2
@@ -22,6 +25,7 @@ func (s *SpellChecker) BestReplacement(in *[]string, index int, candidates []str
     if len(candidates) == 0 {
         return
     }
+	fmt.Println(candidates)
     best := candidates[0]
     bscore := -math.MaxFloat32
     orig := []rune((*in)[index])
@@ -55,6 +59,9 @@ func (s *SpellChecker) BestReplacement(in *[]string, index int, candidates []str
 			bscore = score
 			repl[0], repl[1] = part1, part2
 		}
+	}
+	if bscore == -math.MaxFloat32 {
+		return
 	}
 	*in = append((*in)[:index], append(repl, (*in)[index + 1:]...)...)
 }

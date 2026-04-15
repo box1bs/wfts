@@ -51,14 +51,14 @@ func main() {
 		Level: slog.LevelDebug,
 	})))
 
-	ir, err := repository.NewIndexRepository(cfg.IndexPath, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ir, err := repository.NewIndexRepository(ctx, cfg.IndexPath, uint32(cfg.WorkersCount), log)
 	if err != nil {
 		panic(err)
 	}
 	defer ir.DB.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	go func() {
 		c := make(chan os.Signal, 1)
@@ -119,14 +119,15 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	log := model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
 	})))
-	ir, err := repository.NewIndexRepository(cfg.IndexPath, log)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ir, err := repository.NewIndexRepository(ctx, cfg.IndexPath, uint32(cfg.WorkersCount), log)
 	if err != nil {
 		panic(err)
 	}
 	defer ir.DB.Close()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	done := make(chan struct{})
 	i, err := indexer.NewIndexer(ir, cfg)

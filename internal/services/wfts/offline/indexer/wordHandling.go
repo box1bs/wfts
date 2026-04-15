@@ -15,9 +15,6 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	stem := make(map[string]int, 512)
 	pos := make(map[string][]model.Position, 512)
 	
-	idx.mu.Lock()
-	defer idx.mu.Unlock()
-	
 	logger := ctx.Value(model.DefLogKey).(*model.Logger)
 	if logger == nil {
 		return fmt.Errorf("context canceled")
@@ -128,6 +125,7 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 		}
 		if len(documents) == 0 && stemmed[i].Type == textHandling.WORD { // исправляем только слова
 			conds, err := idx.repository.GetWordsByTGrams(words[wordPos])
+			fmt.Printf("word: %s, conds: %v", words[i], conds)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -30,8 +30,6 @@ type indexer interface {
 	SaveVisitedUrls(*sync.Map) error
 	LoadVisitedUrls(*sync.Map) error
 	SaveHashArrays() error
-	UpdateIndexC() error
-	SaveBloom() error
 }
 
 type WebScraper struct {
@@ -105,8 +103,6 @@ func (ws *WebScraper) Run() error {
 	}
 	defer ws.SaveVisitedUrls(ws.visited)
 	defer ws.SaveHashArrays()
-	defer ws.UpdateIndexC()
-	defer ws.SaveBloom()
 
 	scratchMark := make(chan *linkToken, len(ws.cfg.StartURLs))
 	go func() {
