@@ -71,13 +71,13 @@ type srequest struct {
 type ngChunkIndex struct {
 	chunks 	[676]*os.File // a * 26 + b
 	locks 	[676]sync.RWMutex
-	shards 	[676]chan srequest
+	shards 	[shardSize]chan srequest
 	Bloom 	*RotatingBloom
 }
 
 func NewWordIndex(Cap, bufSize uint32) *ngChunkIndex {
-	chans := [676]chan srequest{}
-	for i := range 676 {
+	chans := [shardSize]chan srequest{}
+	for i := range shardSize {
 		chans[i] = make(chan srequest, bufSize)
 	}
 	return &ngChunkIndex{
@@ -111,7 +111,21 @@ func (ni *ngChunkIndex) loadBloom(path string) error {
 }
 
 func makeBiGramKey(ng string) uint16 {
-	return uint16(ng[0] - 'a') * 26 + uint16(ng[1] - 'a')
+	a := ng[0]
+	b := ng[1]
+	if a > 'Z' {a -= 'a'} else {a -= 'A'}
+	if b > 'Z' {b -= 'a'} else {b -= 'A'}
+	return uint16(a) * 26 + uint16(b)
+}
+
+func makeTriGramKey(ng string) uint16 {
+	a := ng[0]
+	b := ng[1]
+	c := ng[2]
+	if a > 'Z' {a -= 'a'} else {a -= 'A'}
+	if b > 'Z' {b -= 'a'} else {b -= 'A'}
+	if c > 'Z' {c -= 'a'} else {c -= 'A'}
+	return uint16(a) * 676 + uint16(b) * 26 + uint16(c)
 }
 
 func encNGData(wordId uint32, lastLet byte) uint32 {
@@ -131,8 +145,10 @@ func (ir *IndexRepository) IndexTriGrams(words []string) error {
 		}
 		req := srequest{word: word, seqC: make(chan uint32, 1)}
 		var seq uint32
+		shardKey := word[0]
+		if shardKey > 'Z' {shardKey -= 'a'} else {shardKey -= 'A'}
 		select {
-		case ir.ni.shards[makeBiGramKey(word)] <- req:
+		case ir.ni.shards[shardKey] <- req:
 			select {
 			case seq = <- req.seqC:
 			case <-ir.ctx.Done():
@@ -144,7 +160,7 @@ func (ir *IndexRepository) IndexTriGrams(words []string) error {
 
 		for _, ng := range extractTGrams(word) {
 			bkey := makeBiGramKey(ng)
-			tkey := uint16(ng[0] - 'a') * 676 + uint16(ng[1] - 'a') * 26 + uint16(ng[2] - 'a')
+			tkey := makeTriGramKey(ng)
 			ir.ni.locks[bkey].Lock()
 			if ir.ni.chunks[bkey] == nil {
 				ngfile, err := os.OpenFile(filepath.Join(ir.path, fmt.Sprintf(ngPath, bkey)), os.O_APPEND | os.O_WRONLY | os.O_CREATE, 0600)

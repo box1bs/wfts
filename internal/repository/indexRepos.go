@@ -30,7 +30,12 @@ type IndexRepository struct {
 	path 			string
 }
 
-func NewIndexRepository(ctx context.Context, path string, workersCount uint32, log *model.Logger) (*IndexRepository, error) {
+type Cacher interface {
+	Put(any, any)
+	Get(any) any
+}
+
+func NewIndexRepository(ctx context.Context, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
 	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
@@ -41,7 +46,7 @@ func NewIndexRepository(ctx context.Context, path string, workersCount uint32, l
 		log: log,
 		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
-		ni: NewWordIndex(58, workersCount * 2),
+		ni: NewWordIndex(58, uint32(workersCount)),
 		si: &shingleIndex{},
 		path: path,
 		ctx: ctx,
@@ -65,8 +70,8 @@ func NewIndexRepository(ctx context.Context, path string, workersCount uint32, l
 		ir.UpdateIndexC(c)
 	}()	
 
-	for i := range 676 {
-		go ir.alloc(&c, ir.ni.shards[i])
+	for i := range shardSize {
+		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
 	}
 	return ir, nil
 }
@@ -235,7 +240,7 @@ func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
 	})
 }
 
-func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest) {
+func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys Cacher) {
 	defer func() {
 		close(await)
 	}()
@@ -246,32 +251,37 @@ func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest) {
 			return
 		default:
 		}
-		key := fmt.Appendf(nil, wordKey, entry.word)
 		var idx uint32
-		if err := ir.DB.Update(func(txn *badger.Txn) error {
-			it, err := txn.Get(key)
-			if err == nil {
-				it.Value(func(val []byte) error {
-					idx = binary.LittleEndian.Uint32(val)
+		if val := cacheSys.Get(entry.word); val == nil {
+			key := fmt.Appendf(nil, wordKey, entry.word)
+			if err := ir.DB.Update(func(txn *badger.Txn) error {
+				it, err := txn.Get(key)
+				if err == nil {
+					it.Value(func(val []byte) error {
+						idx = binary.LittleEndian.Uint32(val)
+						return nil
+					})
 					return nil
-				})
-				return nil
-			}
+				}
 
-			data := [4]byte{}
-			idx = atomic.AddUint32(startPos, 1)
-			binary.LittleEndian.PutUint32(data[:], idx)
-			if err := txn.Set(key, data[:]); err != nil {
-				return err
-			}
-			if err := txn.Set(fmt.Appendf(nil, seqKey, idx), []byte(entry.word)); err != nil {
-				return err
-			}
-			return nil
+				data := [4]byte{}
+				idx = atomic.AddUint32(startPos, 1)
+				binary.LittleEndian.PutUint32(data[:], idx)
+				if err := txn.Set(key, data[:]); err != nil {
+					return err
+				}
+				if err := txn.Set(fmt.Appendf(nil, seqKey, idx), []byte(entry.word)); err != nil {
+					return err
+				}
+				return nil
 			}); err != nil {
 				ir.log.Errorf("allocation failed: %v", err)
 				return
 			}
+			cacheSys.Put(entry.word, idx)
+		} else {
+			idx = val.(uint32)
+		}
 		entry.seqC <- idx
 	}
 }
