@@ -16,6 +16,7 @@ import (
 	"wfts/internal/services/ui"
 	"wfts/internal/services/wfts/offline/indexer"
 	"wfts/internal/services/wfts/offline/scraper"
+	lrucache "wfts/internal/services/wfts/offline/scraper/lruCache"
 	"wfts/internal/services/wfts/online/searcher"
 )
 
@@ -54,7 +55,9 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ir, err := repository.NewIndexRepository(ctx, cfg.IndexPath, uint32(cfg.WorkersCount), log)
+	ir, err := repository.NewIndexRepository(ctx, cfg.IndexPath, cfg.WorkersCount, log, func(i int) repository.Cacher { // мне вообще не нравится импортить внутренний пакет основного пакета, но я не хочу lru дважды описывать
+		return lrucache.NewLRUCache(i)
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -123,7 +126,9 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	ir, err := repository.NewIndexRepository(ctx, cfg.IndexPath, uint32(cfg.WorkersCount), log)
+	ir, err := repository.NewIndexRepository(ctx, cfg.IndexPath, cfg.WorkersCount, log, func(i int) repository.Cacher {
+		return lrucache.NewLRUCache(i)
+	})
 	if err != nil {
 		panic(err)
 	}
