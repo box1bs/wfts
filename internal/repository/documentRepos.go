@@ -84,6 +84,7 @@ func (ir *IndexRepository) GetDocumentByID(docID [32]byte) (*model.Document, err
 }
 
 func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
+	pref := []byte("doc:")
 	documents := make([]*model.Document, 0, 512)
 	err := ir.DB.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
@@ -91,7 +92,7 @@ func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
 		it := txn.NewIterator(opts)
 		defer it.Close()
 
-		for it.Seek([]byte(DocumentKeyPrefix)); it.ValidForPrefix([]byte(DocumentKeyPrefix)); it.Next() {
+		for it.Seek([]byte(pref)); it.ValidForPrefix([]byte(pref)); it.Next() {
 			item := it.Item()
 			var docBytes []byte
 

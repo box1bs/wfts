@@ -31,26 +31,31 @@ func getMinQueryDistInDoc(positions [][]model.Position, lenQuery int) int {
 		return l
 	}
 
-	for _, startPos := range positions[0] {
-		cur := startPos.I
-		last := cur
-		valid := true
-		for j := 1; j < lenQuery; j++ {
-			arr := positions[j]
-			if len(arr) == 0 {
-				return a * (lenQuery - j) // пенальти для документов не содержащих все слова запроса, как только попадаем под пустой индекс считаем что дальше нет вхождений
+	for i := range lenQuery {
+		for _, startPos := range positions[i] {
+			cur := startPos.I
+			last := cur
+			valid := true
+			for j := i + 1; j < lenQuery; j++ {
+				arr := positions[j]
+				if len(arr) == 0 {
+					penalty := (lenQuery - (j - i)) * a
+					minDencity = min(minDencity, penalty + last-cur)
+					valid = false
+					break
+				}
+				position := bs(j, last)
+				if position >= len(arr) {
+					valid = false
+					break
+				}
+				last = arr[position].I
 			}
-			position := bs(j, last)
-			if position >= len(arr) {
-				valid = false
-				break
+			if !valid {
+				continue
 			}
-			last = arr[position].I
+			minDencity = min(minDencity, i * a + last-cur)
 		}
-		if !valid || last-cur < 0 {
-			continue
-		}
-		minDencity = min(minDencity, last-cur)
 	}
 
 	return minDencity

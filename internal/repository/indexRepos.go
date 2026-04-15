@@ -1,14 +1,18 @@
 package repository
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"unsafe"
 
 	"wfts/internal/model"
 
@@ -22,11 +26,12 @@ type IndexRepository struct {
 	mu 				*sync.Mutex
 	ni				*ngChunkIndex
 	si				*shingleIndex
+	ctx 			context.Context
 	path 			string
 }
 
-func NewIndexRepository(path string, log *model.Logger) (*IndexRepository, error) {
-	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.WARNING))
+func NewIndexRepository(ctx context.Context, path string, workersCount uint32, log *model.Logger) (*IndexRepository, error) {
+	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
 	}
@@ -36,9 +41,10 @@ func NewIndexRepository(path string, log *model.Logger) (*IndexRepository, error
 		log: log,
 		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
-		ni: NewWordIndex(58),
+		ni: NewWordIndex(58, workersCount * 2),
 		si: &shingleIndex{},
 		path: path,
+		ctx: ctx,
 	}
 	if err := os.MkdirAll(filepath.Join(path, "/ngs"), 0755); err != nil {
 		return nil, err
@@ -49,7 +55,20 @@ func NewIndexRepository(path string, log *model.Logger) (*IndexRepository, error
 	if err := ir.ni.loadBloom(path); err != nil {
 		return nil, err
 	}
-	return ir, ir.LoadIndexC() // сомнительно потому что нам не нужно это прокидывать если мы не будем индексировать
+	c, err := ir.LoadIndexC()
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		<-ctx.Done()
+		ir.ni.saveBloom(ir.path)
+		ir.UpdateIndexC(c)
+	}()	
+
+	for i := range 676 {
+		go ir.alloc(&c, ir.ni.shards[i])
+	}
+	return ir, nil
 }
 
 func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
@@ -214,6 +233,80 @@ func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
 		freq = decCount(val)
 		return nil
 	})
+}
+
+func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest) {
+	defer func() {
+		close(await)
+	}()
+
+	for entry := range await {
+		select {
+		case <-ir.ctx.Done():
+			return
+		default:
+		}
+		key := fmt.Appendf(nil, wordKey, entry.word)
+		var idx uint32
+		if err := ir.DB.Update(func(txn *badger.Txn) error {
+			it, err := txn.Get(key)
+			if err == nil {
+				it.Value(func(val []byte) error {
+					idx = binary.LittleEndian.Uint32(val)
+					return nil
+				})
+				return nil
+			}
+
+			data := [4]byte{}
+			idx = atomic.AddUint32(startPos, 1)
+			binary.LittleEndian.PutUint32(data[:], idx)
+			if err := txn.Set(key, data[:]); err != nil {
+				return err
+			}
+			if err := txn.Set(fmt.Appendf(nil, seqKey, idx), []byte(entry.word)); err != nil {
+				return err
+			}
+			return nil
+			}); err != nil {
+				ir.log.Errorf("allocation failed: %v", err)
+				return
+			}
+		entry.seqC <- idx
+	}
+}
+
+func (ir *IndexRepository) SaveSaltArrays(a, b [128]uint64) error {
+	var data [256]uint64
+	copy(data[:128], a[:])
+	copy(data[128:], b[:])
+	file, err := os.OpenFile(filepath.Join(ir.path, "/salt.bin"), os.O_CREATE | os.O_TRUNC | os.O_WRONLY, 0600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = file.Write(
+		unsafe.Slice((*byte)(unsafe.Pointer(&data[0])), 256 * 8),
+	)
+	return err
+}
+
+func (ir *IndexRepository) UploadSaltArrays() (*[128]uint64, *[128]uint64, error) {
+	file, err := os.OpenFile(filepath.Join(ir.path, "/salt.bin"), os.O_RDONLY, 0600)
+	if err != nil && os.IsExist(err) {
+		return nil, nil, err
+	} else if err != nil {
+		return nil, nil, nil
+	}
+	defer file.Close()
+	var a, b [128]uint64
+	if _, err = io.ReadFull(file, unsafe.Slice((*byte)(unsafe.Pointer(&a[0])), 128 * 8)); err != nil {
+		return nil, nil, err
+	}
+	if _, err = io.ReadFull(file, unsafe.Slice((*byte)(unsafe.Pointer(&b[0])), 128 * 8)); err != nil {
+		return nil, nil, err
+	}
+	return &a, &b, nil
 }
 
 func encCount(n int) []byte {
