@@ -97,21 +97,47 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 	return ws
 }
 
-func (ws *WebScraper) Run() error {
+func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *linkToken {
+	out := make(chan *linkToken, ws.cfg.WorkersNum*25)
+	go func() {
+		for {
+			select {
+			case <-ws.globalCtx.Done():
+				close(out)
+				return
+
+			case uri, ok := <-rawUrls:
+				if !ok {
+					break
+				}
+				parsed, err := url.Parse(uri)
+				if err != nil {
+					continue
+				}
+				out <- &linkToken{
+					Link:     parsed,
+					Priority: 1,
+				}
+			}
+		}
+	}()
+	return out
+}
+
+func (ws *WebScraper) Run(urls chan *linkToken) error {
 	if err := ws.LoadVisitedUrls(ws.visited); err != nil {
 		return err
 	}
 	defer ws.SaveVisitedUrls(ws.visited)
 	defer ws.SaveHashArrays()
 
-	scratchMark := make(chan *linkToken, len(ws.cfg.StartURLs))
 	go func() {
 		for _, uri := range ws.cfg.StartURLs {
 			parsed, err := url.Parse(uri)
 			if err != nil {
 				continue
 			}
-			scratchMark <- &linkToken{
+			urls <- &linkToken{
 				Link:     parsed,
 				Priority: 1,
 			}
@@ -123,15 +149,15 @@ func (ws *WebScraper) Run() error {
 
 		for range t.C {
 			if p == len {
-				close(scratchMark)
+				close(urls)
 				return
 			}
 
 			select {
 			case <-ws.globalCtx.Done():
-				close(scratchMark)
+				close(urls)
 				return
-			case scratchMark <- links[p]:
+			case urls <- links[p]:
 				p++
 			default:
 
@@ -139,9 +165,16 @@ func (ws *WebScraper) Run() error {
 		}
 	}()
 
-	for uri := range scratchMark {
+	for uri := range urls {
 		if ws.checkContext(ws.globalCtx) {
 			return nil
+		}
+		normalized, err := normalizeUrl(uri.Link)
+		if err != nil {
+			continue
+		}
+		if _, load := ws.visited.Load(normalized); load {
+			continue
 		}
 		log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 			ReplaceAttr: model.Replacer,

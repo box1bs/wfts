@@ -1,6 +1,8 @@
 package model
 
-import "time"
+import (
+	"time"
+)
 
 // General structure for describe any web page
 type Document struct {
@@ -36,6 +38,12 @@ const (
 	Canceled
 	Error
 )
+
+type SearchResult struct {
+	Docs 	[]*Document
+	Rels 	[]*DocRanking
+	Metrics *SearchMetrics
+}
 
 // Searching part
 type SearchMetrics struct {

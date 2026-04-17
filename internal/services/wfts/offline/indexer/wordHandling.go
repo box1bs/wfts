@@ -11,7 +11,7 @@ import (
 	lr "github.com/box1bs/logistic_regression_go"
 )
 
-func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, externalFeatures *model.CrawlFeatures, priority *float64, passages []model.Passage) error {
+func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, externalFeatures *model.CrawlFeatures, priority *float64, passages []model.Passage) error {
 	stem := make(map[string]int, 512)
 	pos := make(map[string][]model.Position, 512)
 	
@@ -98,7 +98,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	return nil
 }
 
-func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string, []map[[32]byte]model.WordCountAndPositions, error) {
+func (idx *Indexer) HandleTextQuery(ctx context.Context, text string) ([]string, []map[[32]byte]model.WordCountAndPositions, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
