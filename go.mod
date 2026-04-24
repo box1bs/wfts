@@ -8,10 +8,7 @@ require (
 	golang.org/x/net v0.46.0
 )
 
-require (
-	github.com/nsf/termbox-go v1.1.1 // indirect
-	github.com/stretchr/testify v1.8.4 // indirect
-)
+require github.com/stretchr/testify v1.8.4 // indirect
 
 require (
 	github.com/cespare/xxhash v1.1.0 // indirect
@@ -24,11 +21,8 @@ require (
 	github.com/golang/protobuf v1.3.1 // indirect
 	github.com/golang/snappy v0.0.3 // indirect
 	github.com/google/flatbuffers v1.12.1 // indirect
-	github.com/jroimartin/gocui v0.5.0
 	github.com/klauspost/compress v1.12.3 // indirect
-	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/rivo/uniseg v0.4.7 // indirect
 	go.opencensus.io v0.22.5 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0

@@ -17,7 +17,7 @@ type ConfigData struct {
 }
 
 func (cfg *ConfigData) Validate() error {
-	return New("validate").Validate(*cfg)
+	return New().Validate(*cfg)
 }
 
 func UploadLocalConfiguration(fileName string) (*ConfigData, error) {

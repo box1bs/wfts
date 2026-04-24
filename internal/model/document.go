@@ -26,6 +26,13 @@ type CrawlFeatures struct {
 	HostLen	 int
 }
 
+type CrawlState struct {
+	LastStart 	time.Time
+	Uptime 		time.Duration
+	DocsInIndex int
+	IsRunning 	bool
+}
+
 type CrawlNode struct {
 	Activation 	func() CompletionState
 	CrawlToken  any

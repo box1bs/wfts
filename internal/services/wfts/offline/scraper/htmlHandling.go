@@ -125,7 +125,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			switch tagName {
 			case "html":
 				for _, attr := range t.Attr {
-					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {log.Debugf("Not eng html"); return}
+					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {return}
 				}
 
 			case "h1", "h2":
@@ -165,7 +165,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								break
 							}
 							if ext := strings.ToLower(path.Ext(uri.Path)); ext == ".pdf" || ext == ".xml" {
-								log.Infof("pdf or xml link: %s", uri.String())
 								break
 							}
 							if types := uri.Query()["format"]; len(types) > 0 {
@@ -178,7 +177,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								}
 
 								if !allowed {
-									log.Infof("potential non-html link: %s", uri.String())
 									break
 								}
 							}

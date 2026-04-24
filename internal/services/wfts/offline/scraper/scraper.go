@@ -41,6 +41,7 @@ type WebScraper struct {
 	rlCache   	*lrucache.LRUCache
 	rulesCache 	*lrucache.LRUCache
 	mu 			*sync.Mutex
+	wg 			*sync.WaitGroup
 	pool      	*scheduler.WorkerPool
 	globalCtx 	context.Context
 }
@@ -74,7 +75,7 @@ const (
 	numOfTries   = 3 // если кто то решил поменять это на 0, чтож, удачи
 )
 
-func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
+func NewScraper(cfg *configData, wg *sync.WaitGroup, idx indexer, c context.Context) *WebScraper {
 	ws := &WebScraper{
 		indexer: idx,
 		client: &http.Client{
@@ -91,9 +92,14 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 		rlCache:   lrucache.NewLRUCache(cfg.WorkersNum * 25),
 		rulesCache:lrucache.NewLRUCache(cfg.WorkersNum * 25),
 		mu: 	   &sync.Mutex{},
+		wg: 	   wg,
 		globalCtx: c,
 	}
-	ws.pool = scheduler.NewWorkerPool(ws.makeScratchMark, cfg.WorkersNum, cfg.WorkersNum*50)
+	ws.pool = scheduler.NewWorkerPool(func(a []any) {
+		wg.Add(1)
+		defer wg.Done()
+		ws.makeScratchMark(a)
+	}, cfg.WorkersNum, cfg.WorkersNum*50)
 	return ws
 }
 
@@ -103,7 +109,6 @@ func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *linkToken {
 		for {
 			select {
 			case <-ws.globalCtx.Done():
-				close(out)
 				return
 
 			case uri, ok := <-rawUrls:
@@ -128,8 +133,13 @@ func (ws *WebScraper) Run(urls chan *linkToken) error {
 	if err := ws.LoadVisitedUrls(ws.visited); err != nil {
 		return err
 	}
-	defer ws.SaveVisitedUrls(ws.visited)
-	defer ws.SaveHashArrays()
+
+	ws.wg.Add(1)
+	defer func() {
+		defer ws.wg.Done()
+		ws.SaveVisitedUrls(ws.visited)
+		ws.SaveHashArrays()
+	}()
 
 	go func() {
 		for _, uri := range ws.cfg.StartURLs {
@@ -149,13 +159,11 @@ func (ws *WebScraper) Run(urls chan *linkToken) error {
 
 		for range t.C {
 			if p == len {
-				close(urls)
 				return
 			}
 
 			select {
 			case <-ws.globalCtx.Done():
-				close(urls)
 				return
 			case urls <- links[p]:
 				p++

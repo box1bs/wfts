@@ -1,4 +1,4 @@
-.DEFAULT_GOAL=index
+.DEFAULT_GOAL=run
 BINARY_NAME=wfts
 CONFIG_PATH=./configs/default.json
 LOCAL_BIN_PATH=./.data/
@@ -9,17 +9,11 @@ build: test
 test:
 	go test ./... -v -count=1 -parallel=1 | grep -v "no test files" || true
 
-index: build
+run: build
 	./.bin/${BINARY_NAME} --config=${CONFIG_PATH}
 
 panic-test: build
 	./.bin/${BINARY_NAME} > ./logs/panic.txt 2>&1
-
-index-gui: build
-	./.bin/${BINARY_NAME} --gui --config=${CONFIG_PATH}
-
-search: build
-	./.bin/${BINARY_NAME} -i --config=${CONFIG_PATH}
 
 clear:
 	rm -f ${LOCAL_BIN_PATH}index/*

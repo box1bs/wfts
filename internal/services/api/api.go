@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"os"
 	"strconv"
+	"time"
 	"wfts/configs"
 	"wfts/internal/model"
 )
@@ -20,6 +20,8 @@ type crawler interface {
 	AddUrlsToProcess(outerCtx context.Context, urls []string) error
 	StartCrawling(outerCtx context.Context, config *configs.ConfigData) error
 	StopCrawling(outerCtx context.Context) error
+
+	GetCurrentState() (*model.CrawlState, error)
 }
 
 type searcher interface {
@@ -27,9 +29,9 @@ type searcher interface {
 }
 
 type server struct {
-	factory Factory
-	global  context.Context
-	cfg 	*configs.ConfigData
+	factory 	Factory
+	global  	context.Context
+	cfg 		*configs.ConfigData
 }
 
 func NewServer(ctx context.Context, cfg *configs.ConfigData, f Factory) *server {
@@ -40,13 +42,17 @@ func NewServer(ctx context.Context, cfg *configs.ConfigData, f Factory) *server 
 	}
 }
 
-func (s *server) Start(port string) error {
+func (s *server) Start(addr string, port int) error {
 	mux := http.NewServeMux()
-	defaultLogger := model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
-		ReplaceAttr: model.Replacer,
-		Level: slog.LevelInfo,
-	})))
+	srv := &http.Server{Addr: addr + ":" + strconv.Itoa(port), Handler: mux}
+	go func() {
+		<-s.global.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
+	}()
 
+	defaultLogger := s.global.Value(model.DefLogKey).(*model.Logger)
 	mux.HandleFunc("POST /crawl/start", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.factory.StartCrawling(s.global, s.cfg); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -57,18 +63,49 @@ func (s *server) Start(port string) error {
 	})
 
 	mux.HandleFunc("PATCH /crawl/add", func(w http.ResponseWriter, r *http.Request) {
-		var data []string
-		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		var payload struct {
+			Urls []string `json:"urls" validate:"len=1:50"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := configs.New().Validate(payload); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		if err := s.factory.AddUrlsToProcess(s.global, data); err != nil {
+		if err := s.factory.AddUrlsToProcess(s.global, payload.Urls); err != nil {
 			http.Error(w, err.Error(), http.StatusExpectationFailed)
 			return
 		}
 
 		w.WriteHeader(http.StatusAccepted)
+	})
+
+	mux.HandleFunc("GET /crawl/state", func(w http.ResponseWriter, r *http.Request) {
+		state, err := s.factory.GetCurrentState()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			defaultLogger.Errorf("crawling state error: %v", err)
+			return
+		}
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(state); err != nil {
+			defaultLogger.Errorf("state response sending failed: %v", err)
+		}
+	})
+
+	mux.HandleFunc("POST /crawl/stop", func(w http.ResponseWriter, r *http.Request) {
+		ctx := context.WithValue(s.global, model.DefLogKey, defaultLogger.AddAttr(slog.String("user_agent", r.UserAgent())))
+		if err := s.factory.StopCrawling(ctx); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
 	})
 
 	mux.HandleFunc("GET /search", func(w http.ResponseWriter, r *http.Request) {
@@ -93,19 +130,8 @@ func (s *server) Start(port string) error {
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(result); err != nil {
-			// TODO
+			local.Errorf("search response sending failed: %v", err)
 		}
 	})
-
-	mux.HandleFunc("POST /crawl/stop", func(w http.ResponseWriter, r *http.Request) {
-		ctx := context.WithValue(s.global, model.DefLogKey, defaultLogger.AddAttr(slog.String("user_agent", r.UserAgent())))
-		if err := s.factory.StopCrawling(ctx); err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-	})
-
-	return http.ListenAndServe(port, mux)
+	return srv.ListenAndServe()
 }

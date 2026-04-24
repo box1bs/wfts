@@ -35,7 +35,7 @@ type Cacher interface {
 	Get(any) any
 }
 
-func NewIndexRepository(ctx context.Context, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
+func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
 	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
@@ -64,14 +64,17 @@ func NewIndexRepository(ctx context.Context, path string, workersCount int, log 
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+
+	backupWg.Go(func() {
 		<-ctx.Done()
 		ir.ni.saveBloom(ir.path)
-		ir.UpdateIndexC(c)
-	}()	
+		ir.UpdateIndexC(atomic.LoadUint32(&c))
+	})
 
 	for i := range shardSize {
-		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
+		go func() {
+			ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
+		}()
 	}
 	return ir, nil
 }

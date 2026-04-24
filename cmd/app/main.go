@@ -3,30 +3,55 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"sync"
 	"wfts/configs"
 	"wfts/internal/app"
+	"wfts/internal/model"
 	"wfts/internal/services/api"
 )
 
 func main() {
+	ctx := context.Background()
+	if err := run(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "unexpected error occured: %v", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context) error {
+	ctx, cancel := signal.NotifyContext(ctx, os.Interrupt)
+	defer cancel()
+
+	backupWG := &sync.WaitGroup{}
 	var (
 		configFile = flag.String("config", "default.json", "Path to configuration file")
 		// indexFlag = flag.Bool("i", false, "disable indexing")
-		port = flag.String("p", ":8080", "server port")
+		addr = flag.String("addr", "localhost", "server address")
+		port = flag.Int("p", 8080, "server port")
 	)
 	flag.Parse()
 
 	cfg, err := configs.UploadLocalConfiguration(*configFile)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel() // дефер в main да да, да да да
-	factory, err := app.Init(ctx, cfg, 10)
+	valued := context.WithValue(ctx, model.DefLogKey, model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		ReplaceAttr: model.Replacer,
+		Level: slog.LevelDebug,
+	}))))
+	factory, err := app.Init(valued, backupWG, cfg, 10)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	srv := api.NewServer(ctx, cfg, factory)
-	srv.Start(*port)
+	if err := api.NewServer(valued, cfg, factory).Start(*addr, *port); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	backupWG.Wait()
+	return nil
 }
