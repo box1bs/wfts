@@ -41,10 +41,11 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	valued := context.WithValue(ctx, model.DefLogKey, model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	log := model.NewLogger(slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
 		Level: slog.LevelDebug,
-	}))))
+	})))
+	valued := context.WithValue(ctx, model.DefLogKey, log)
 	factory, err := app.Init(valued, backupWG, cfg, 10)
 	if err != nil {
 		return err

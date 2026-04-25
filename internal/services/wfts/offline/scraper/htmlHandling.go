@@ -45,7 +45,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 		return nil, fmt.Errorf(canceled)
 	}
     if err != nil {
-		log.Errorf("url page error: %v", err)
+		log.Errorf("%v", err)
         return nil, err
     }
 	if doc == "" {
@@ -278,7 +278,7 @@ func (ws *WebScraper) getHTML(ctx context.Context, URL string, rl *rateLimiter, 
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html")
 
-	rl.GetToken(ws.globalCtx) // не должно ложить приложение, но в целом по желанию
+	rl.GetToken(ws.globalCtx)
 	resp, err := ws.client.Do(req)
 	if err != nil {
 		return "", err

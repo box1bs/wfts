@@ -41,7 +41,6 @@ type WebScraper struct {
 	rlCache   	*lrucache.LRUCache
 	rulesCache 	*lrucache.LRUCache
 	mu 			*sync.Mutex
-	wg 			*sync.WaitGroup
 	pool      	*scheduler.WorkerPool
 	globalCtx 	context.Context
 }
@@ -75,7 +74,7 @@ const (
 	numOfTries   = 3 // если кто то решил поменять это на 0, чтож, удачи
 )
 
-func NewScraper(cfg *configData, wg *sync.WaitGroup, idx indexer, c context.Context) *WebScraper {
+func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 	ws := &WebScraper{
 		indexer: idx,
 		client: &http.Client{
@@ -92,14 +91,9 @@ func NewScraper(cfg *configData, wg *sync.WaitGroup, idx indexer, c context.Cont
 		rlCache:   lrucache.NewLRUCache(cfg.WorkersNum * 25),
 		rulesCache:lrucache.NewLRUCache(cfg.WorkersNum * 25),
 		mu: 	   &sync.Mutex{},
-		wg: 	   wg,
 		globalCtx: c,
 	}
-	ws.pool = scheduler.NewWorkerPool(func(a []any) {
-		wg.Add(1)
-		defer wg.Done()
-		ws.makeScratchMark(a)
-	}, cfg.WorkersNum, cfg.WorkersNum*50)
+	ws.pool = scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum*50)
 	return ws
 }
 
@@ -134,9 +128,7 @@ func (ws *WebScraper) Run(urls chan *linkToken) error {
 		return err
 	}
 
-	ws.wg.Add(1)
 	defer func() {
-		defer ws.wg.Done()
 		ws.SaveVisitedUrls(ws.visited)
 		ws.SaveHashArrays()
 	}()
@@ -173,37 +165,45 @@ func (ws *WebScraper) Run(urls chan *linkToken) error {
 		}
 	}()
 
-	for uri := range urls {
-		if ws.checkContext(ws.globalCtx) {
-			return nil
-		}
-		normalized, err := normalizeUrl(uri.Link)
-		if err != nil {
-			continue
-		}
-		if _, load := ws.visited.Load(normalized); load {
-			continue
-		}
-		log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
-			ReplaceAttr: model.Replacer,
-			Level:       slog.LevelError,
-		})).With(
-			slog.Group("node_properties",
-				slog.String("url", uri.Link.String()),
-				slog.Int("depth", uri.Depth),
-				slog.Float64("priority", uri.Priority),
-			),
-		))
-		ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
-			ws.rlCache.Put(uri.Link.Hostname(), NewRateLimiter(DefaultDelay))
-			ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
-			defer cancel()
-			return ws.ScrapeWithContext(ctx, uri)
-		}, Priority: uri.Priority, CrawlToken: uri})
-	}
+	ws.dispatch(urls)
 	ws.pool.Wait()
 	ws.pool.Stop()
-	return nil
+	return ws.makeScratchMark(ws.pool.Backup())
+}
+
+func (ws *WebScraper) dispatch(urls chan *linkToken) {
+	for {
+		select {
+		case <-ws.globalCtx.Done():
+			return
+
+		case uri := <-urls:
+			normalized, err := normalizeUrl(uri.Link)
+			if err != nil {
+				continue
+			}
+			if _, load := ws.visited.Load(normalized); load {
+				continue
+			}
+			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
+				ReplaceAttr: model.Replacer,
+				Level:       slog.LevelDebug,
+			})).With(
+				slog.Group("node_properties",
+					slog.String("url", uri.Link.String()),
+					slog.Int("depth", uri.Depth),
+					slog.Float64("priority", uri.Priority),
+				),
+			))
+			ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
+				ws.rlCache.Put(uri.Link.Hostname(), NewRateLimiter(DefaultDelay))
+				ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
+				defer cancel()
+				return ws.ScrapeWithContext(ctx, uri)
+			}, Priority: uri.Priority, CrawlToken: uri})
+
+		}
+	}
 }
 
 func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken) model.CompletionState {
@@ -330,15 +330,15 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 	return model.Done
 }
 
-func (ws *WebScraper) makeScratchMark(toMark []any) {
+func (ws *WebScraper) makeScratchMark(toMark []any) error {
 	var buf bytes.Buffer
 	for _, t := range toMark {
 		token := t.(*linkToken)
 		if _, err := fmt.Fprintf(&buf, "%s|%.16f|%d\n", token.Link.String(), token.Priority, token.Depth); err != nil {
-			return
+			return err
 		}
 	}
-	os.WriteFile(ws.cfg.ScratchPath, buf.Bytes(), 0600)
+	return os.WriteFile(ws.cfg.ScratchPath, buf.Bytes(), 0600)
 }
 
 func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {

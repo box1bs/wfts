@@ -28,7 +28,6 @@ type Factory struct {
 
 const (
 	queueIsFull = "queue is full"
-	queryTooBig = "query is too big"
 	isNotExist = "scraper is not running"
 	isExist = "scraper not running"
 	maxUrls = 50
@@ -68,11 +67,6 @@ func (f *Factory) AddUrlsToProcess(outerCtx context.Context, urls []string) erro
 
 	log := outerCtx.Value(model.DefLogKey).(*model.Logger)
 	for i, url := range urls {
-		if i > maxUrls {
-			log.Debugf("urls count is too big, stopped after %d urls", i+1)
-			return errors.New(queryTooBig)
-		}
-
 		select {
 		case f.complCh <- url:
 			log.Infof("url %s added", url)
@@ -96,8 +90,11 @@ func (f *Factory) StartCrawling(outerCtx context.Context, config *configs.Config
 	}
 	f.startPoint = time.Now()
 	f.innerCtx, f.controller = context.WithCancel(outerCtx)
-	f.scraper = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.MaxDepth, config.OnlySameDomain), f.backupWG, f.indexer, f.innerCtx)
-	return f.scraper.Run(f.scraper.PrepareChan(f.complCh))
+	f.scraper = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.MaxDepth, config.OnlySameDomain), f.indexer, f.innerCtx)
+	f.backupWG.Go(func() {
+		f.scraper.Run(f.scraper.PrepareChan(f.complCh))
+	})
+	return nil
 }
 
 func (f *Factory) GetCurrentState() (*model.CrawlState, error) {
@@ -106,8 +103,8 @@ func (f *Factory) GetCurrentState() (*model.CrawlState, error) {
 		return nil, err
 	}
 	return &model.CrawlState{
-		LastStart: f.startPoint,
-		Uptime: f.getUptimeTime(),
+		LastStart: f.startPoint.Format("15:04:05 01-02-2006"),
+		Uptime: f.getUptimeTime().String(),
 		DocsInIndex: docs,
 		IsRunning: f.isRunning(),
 	}, nil

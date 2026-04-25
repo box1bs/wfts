@@ -22,7 +22,6 @@ import (
 type IndexRepository struct {
 	DB 				*badger.DB
 	log 			*model.Logger
-	wg 				*sync.WaitGroup
 	mu 				*sync.Mutex
 	ni				*ngChunkIndex
 	si				*shingleIndex
@@ -44,7 +43,6 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	ir := &IndexRepository{
 		DB: db,
 		log: log,
-		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
 		ni: NewWordIndex(58, uint32(workersCount)),
 		si: &shingleIndex{},
@@ -72,9 +70,7 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	})
 
 	for i := range shardSize {
-		go func() {
-			ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
-		}()
+		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
 	}
 	return ir, nil
 }

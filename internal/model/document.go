@@ -27,8 +27,8 @@ type CrawlFeatures struct {
 }
 
 type CrawlState struct {
-	LastStart 	time.Time
-	Uptime 		time.Duration
+	LastStart 	string
+	Uptime 		string
 	DocsInIndex int
 	IsRunning 	bool
 }

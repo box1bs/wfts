@@ -7,7 +7,6 @@ import (
 )
 
 type WorkerPool struct {
-	bfShutdown 	func([]any)
 	buf 		chan struct{}
 	quit      	chan struct{}
 	collector 	chan any
@@ -16,9 +15,8 @@ type WorkerPool struct {
 	mu 			*sync.Mutex
 }
 
-func NewWorkerPool(beforeShutdown func([]any), size, queueCapacity int) *WorkerPool {
+func NewWorkerPool(size, queueCapacity int) *WorkerPool {
 	wp := &WorkerPool{
-		bfShutdown: 	beforeShutdown,
 		buf: 			make(chan struct{}, queueCapacity),
 		quit:      		make(chan struct{}),
 		collector: 		make(chan any, queueCapacity),
@@ -95,13 +93,11 @@ func (wp *WorkerPool) worker() {
 }
 
 func (wp *WorkerPool) Backup() []any {
+	defer close(wp.collector)
 	canceleds := wp.heap.tokens()
 	for {
 		select {
-		case token, ok := <-wp.collector:
-			if !ok {
-				return canceleds
-			}
+		case token := <-wp.collector:
 			canceleds = append(canceleds, token)
 
 		default:
@@ -116,10 +112,6 @@ func (wp *WorkerPool) Wait() {
 }
 
 func (wp *WorkerPool) Stop() {
-	defer close(wp.collector)
-	defer func () {
-		wp.bfShutdown(wp.Backup())
-	}()
 	close(wp.quit)
 	close(wp.buf)
 	wp.Wait()
