@@ -89,7 +89,7 @@ func main() {
 	}
 
 	fmt.Printf("Index built with %d documents. Enter search queries (q to exit):\n", count)
-	s := searcher.NewSearcher(i, ir)
+	s := searcher.NewSearcher(i)
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Print("\n> ")
