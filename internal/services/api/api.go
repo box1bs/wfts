@@ -42,9 +42,9 @@ func NewServer(ctx context.Context, cfg *configs.ConfigData, f Factory) *server 
 	}
 }
 
-func (s *server) Start(addr string, port int) error {
+func (s *server) Start() error {
 	mux := http.NewServeMux()
-	srv := &http.Server{Addr: addr + ":" + strconv.Itoa(port), Handler: mux}
+	srv := &http.Server{Addr: ":8080", Handler: mux}
 	go func() {
 		<-s.global.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5 * time.Second)

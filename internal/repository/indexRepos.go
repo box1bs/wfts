@@ -35,11 +35,13 @@ type Cacher interface {
 }
 
 func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
-	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.INFO))
+	opts := badger.DefaultOptions(path + "/index")
+	opts.BlockCacheSize = 32 << 20
+	opts.IndexCacheSize = 16 << 20
+	db, err := badger.Open(opts.WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
 	}
-	db.CacheMaxCost(badger.BlockCache, 128 << 20)
 	ir := &IndexRepository{
 		DB: db,
 		log: log,

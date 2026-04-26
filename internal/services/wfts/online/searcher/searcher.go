@@ -113,8 +113,6 @@ func (s *Searcher) Search(log *model.Logger, query string, maxLen int) ([]*model
 			}
 		}
 		rank[id] = r
-		log.Infof("doc=%s tokens=%d tfidf=%.6f len_norm=%.2f", 
-        doc.URL, doc.TokenCount, r.Tf_Idf, float64(doc.TokenCount) / avgLen)
 	}
 	
 	log.Infof("result len: %d", len(result))

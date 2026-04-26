@@ -31,8 +31,6 @@ func run(ctx context.Context) error {
 	var (
 		configFile = flag.String("config", "default.json", "Path to configuration file")
 		// indexFlag = flag.Bool("i", false, "disable indexing")
-		addr = flag.String("addr", "localhost", "server address")
-		port = flag.Int("p", 8080, "server port")
 	)
 	flag.Parse()
 
@@ -50,7 +48,7 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := api.NewServer(valued, cfg, factory).Start(*addr, *port); err != nil && err != http.ErrServerClosed {
+	if err := api.NewServer(valued, cfg, factory).Start(); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	backupWG.Wait()
