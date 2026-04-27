@@ -10,6 +10,6 @@ COPY --from=builder /app/.bin/wfts .
 COPY model .
 COPY scaler .
 COPY configs/default.json .
-VOLUME [ "/data" ]
+VOLUME [ "/app/.data" ]
 EXPOSE 8080
 CMD ["./wfts"]
