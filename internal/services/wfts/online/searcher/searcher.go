@@ -2,8 +2,6 @@ package searcher
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"math"
 	"sort"
 	"strings"
@@ -15,6 +13,7 @@ import (
 type index interface {
 	HandleTextQuery(context.Context, string) ([]string, []map[[32]byte]model.WordCountAndPositions, error)
 	GetAVGLen() (float64, error)
+	resitory
 }
 
 type resitory interface {
@@ -24,21 +23,15 @@ type resitory interface {
 
 type Searcher struct {
 	idx 		index
-	repo 	 	resitory
 }
 
-func NewSearcher(idx index, repo resitory) *Searcher {
+func NewSearcher(idx index) *Searcher {
 	return &Searcher{
 		idx:       	idx,
-		repo: 	 	repo,
 	}
 }
 
-func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Document, []*model.DocRanking, *model.SearchMetrics) {
-	log := model.NewLogger(slog.New(slog.NewJSONHandler(wr, &slog.HandlerOptions{
-		ReplaceAttr: model.Replacer,
-		Level: slog.LevelInfo,
-	})).With(slog.String("query", query)))
+func (s *Searcher) Search(log *model.Logger, query string, maxLen int) ([]*model.Document, []*model.DocRanking, *model.SearchMetrics) {
 	metrics := &model.SearchMetrics{}
 	t1p := time.Now()
 	searchContext := context.WithValue(context.Background(), model.DefLogKey, log)
@@ -57,7 +50,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 		return nil, nil, nil
 	}
 	
-	length, err := s.repo.GetDocumentsCount()
+	length, err := s.idx.GetDocumentsCount()
 	if err != nil {
 		log.Errorf("%v", err)
 		return nil, nil, nil
@@ -83,7 +76,7 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 			if _, ex := docs[id]; ex {
 				continue
 			}
-			docs[id], err = s.repo.GetDocumentByID(id)
+			docs[id], err = s.idx.GetDocumentByID(id)
 			if err != nil {
 				return nil, nil, nil
 			}
@@ -120,8 +113,6 @@ func (s *Searcher) Search(wr io.Writer, query string, maxLen int) ([]*model.Docu
 			}
 		}
 		rank[id] = r
-		log.Infof("doc=%s tokens=%d tfidf=%.6f len_norm=%.2f", 
-        doc.URL, doc.TokenCount, r.Tf_Idf, float64(doc.TokenCount) / avgLen)
 	}
 	
 	log.Infof("result len: %d", len(result))

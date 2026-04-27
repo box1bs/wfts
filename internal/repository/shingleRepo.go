@@ -71,21 +71,21 @@ func (ir *IndexRepository) GetSimilarSigns(sign [128]uint64) ([][128]uint64, err
 		defer file.Close()
 		for {
 			var key [8]uint64
-			if _, err := io.ReadFull(ir.si.chunks[chunkKey], unsafe.Slice((*byte)(unsafe.Pointer(&key[0])), 8 * 8)); err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+			if _, err := io.ReadFull(file, unsafe.Slice((*byte)(unsafe.Pointer(&key[0])), 8 * 8)); err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
 				ir.si.mutexes[chunkKey].Unlock()
 				return nil, err
 			} else if err != nil {
 				break
 			}
 			if key != signChunk {
-				if _, err := ir.si.chunks[chunkKey].Seek(128 * 8, io.SeekCurrent); err != nil { // пропускаем sign, чтобы проверить ключ следующего
+				if _, err := file.Seek(128 * 8, io.SeekCurrent); err != nil { // пропускаем sign, чтобы проверить ключ следующего
 					ir.si.mutexes[chunkKey].Unlock()
 					return nil, err
 				}
 				continue
 			}
 			var sign [128]uint64
-			if _, err := io.ReadFull(ir.si.chunks[chunkKey], unsafe.Slice((*byte)(unsafe.Pointer(&sign[0])), 128 * 8)); err != nil {
+			if _, err := io.ReadFull(file, unsafe.Slice((*byte)(unsafe.Pointer(&sign[0])), 128 * 8)); err != nil {
 				ir.si.mutexes[chunkKey].Unlock()
 				return nil, err
 			}

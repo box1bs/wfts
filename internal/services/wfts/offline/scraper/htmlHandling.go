@@ -45,7 +45,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 		return nil, fmt.Errorf(canceled)
 	}
     if err != nil {
-		log.Errorf("url page error: %v", err)
+		log.Errorf("%v", err)
         return nil, err
     }
 	if doc == "" {
@@ -125,7 +125,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			switch tagName {
 			case "html":
 				for _, attr := range t.Attr {
-					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {log.Debugf("Not eng html"); return}
+					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {return}
 				}
 
 			case "h1", "h2":
@@ -165,7 +165,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								break
 							}
 							if ext := strings.ToLower(path.Ext(uri.Path)); ext == ".pdf" || ext == ".xml" {
-								log.Infof("pdf or xml link: %s", uri.String())
 								break
 							}
 							if types := uri.Query()["format"]; len(types) > 0 {
@@ -178,7 +177,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								}
 
 								if !allowed {
-									log.Infof("potential non-html link: %s", uri.String())
 									break
 								}
 							}
@@ -280,7 +278,7 @@ func (ws *WebScraper) getHTML(ctx context.Context, URL string, rl *rateLimiter, 
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html")
 
-	rl.GetToken(ws.globalCtx) // не должно ложить приложение, но в целом по желанию
+	rl.GetToken(ws.globalCtx)
 	resp, err := ws.client.Do(req)
 	if err != nil {
 		return "", err

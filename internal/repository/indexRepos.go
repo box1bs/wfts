@@ -22,7 +22,6 @@ import (
 type IndexRepository struct {
 	DB 				*badger.DB
 	log 			*model.Logger
-	wg 				*sync.WaitGroup
 	mu 				*sync.Mutex
 	ni				*ngChunkIndex
 	si				*shingleIndex
@@ -35,16 +34,17 @@ type Cacher interface {
 	Get(any) any
 }
 
-func NewIndexRepository(ctx context.Context, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
-	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.INFO))
+func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
+	opts := badger.DefaultOptions(path + "/index")
+	opts.BlockCacheSize = 32 << 20
+	opts.IndexCacheSize = 16 << 20
+	db, err := badger.Open(opts.WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
 	}
-	db.CacheMaxCost(badger.BlockCache, 128 << 20)
 	ir := &IndexRepository{
 		DB: db,
 		log: log,
-		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
 		ni: NewWordIndex(58, uint32(workersCount)),
 		si: &shingleIndex{},
@@ -64,11 +64,12 @@ func NewIndexRepository(ctx context.Context, path string, workersCount int, log 
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+
+	backupWg.Go(func() {
 		<-ctx.Done()
 		ir.ni.saveBloom(ir.path)
-		ir.UpdateIndexC(c)
-	}()	
+		ir.UpdateIndexC(atomic.LoadUint32(&c))
+	})
 
 	for i := range shardSize {
 		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))

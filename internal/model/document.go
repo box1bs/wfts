@@ -1,6 +1,8 @@
 package model
 
-import "time"
+import (
+	"time"
+)
 
 // General structure for describe any web page
 type Document struct {
@@ -24,6 +26,13 @@ type CrawlFeatures struct {
 	HostLen	 int
 }
 
+type CrawlState struct {
+	LastStart 	string
+	Uptime 		string
+	DocsInIndex int
+	IsRunning 	bool
+}
+
 type CrawlNode struct {
 	Activation 	func() CompletionState
 	CrawlToken  any
@@ -36,6 +45,12 @@ const (
 	Canceled
 	Error
 )
+
+type SearchResult struct {
+	Docs 	[]*Document
+	Rels 	[]*DocRanking
+	Metrics *SearchMetrics
+}
 
 // Searching part
 type SearchMetrics struct {

@@ -11,8 +11,8 @@ type validator struct {
 	key string
 }
 
-func New(key string) *validator {
-	return &validator{key: key}
+func New() *validator {
+	return &validator{key: "validate"}
 }
 
 func (v *validator) Validate(i any) error {
