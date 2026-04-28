@@ -29,7 +29,7 @@ type Factory struct {
 const (
 	queueIsFull = "queue is full"
 	isNotExist = "scraper is not running"
-	isExist = "scraper not running"
+	isExist = "scraper is running"
 	maxUrls = 50
 )
 
