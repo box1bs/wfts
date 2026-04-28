@@ -53,20 +53,20 @@ func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	}
 
 	sim := 0.0
-	// if l := len(allWordTokens); !skipIndexAdding && l > 4 {
-	// 	sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
-	// 	conds, err := idx.repository.GetSimilarSigns(sign)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if sim = calcSim(sign, conds); sim > 0.8 {
-	// 		logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
-	// 		return fmt.Errorf("page already indexed")
-	// 	}
-	// 	if err := idx.repository.IndexDocShingles(sign); err != nil {
-	// 		return err
-	// 	}
-	// }
+	if l := len(allWordTokens); !skipIndexAdding && l > 4 {
+		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
+		conds, err := idx.repository.GetSimilarSigns(sign)
+		if err != nil {
+			return err
+		}
+		if sim = calcSim(sign, conds); sim > 0.8 {
+			logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
+			return fmt.Errorf("page already indexed")
+		}
+		if err := idx.repository.IndexDocShingles(sign); err != nil {
+			return err
+		}
+	}
 
 	bigrams := make(map[[2]uint64]int)
 	for j := 1; j < len(allWordTokens); j++ {

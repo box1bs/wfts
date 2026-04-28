@@ -190,13 +190,10 @@ func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
 	ngs := extractTGramsByBGram(word)
 
 	for bkey, ng := range ngs {
-		ir.ni.locks[bkey].Lock()
 		file, err := os.OpenFile(filepath.Join(ir.path, fmt.Sprintf(ngPath, bkey)), os.O_RDONLY, 0600)
 		if err != nil && os.IsExist(err) {
-			ir.ni.locks[bkey].Unlock()
 			return nil, err
 		} else if err != nil {
-			ir.ni.locks[bkey].Unlock()
 			continue
 		}
 		defer file.Close()
@@ -204,7 +201,6 @@ func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
 			buf := make([]byte, 4 * 16) // 16 по uint32
 			n, err := file.Read(buf)
 			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-				ir.ni.locks[bkey].Unlock()
 				return nil, err
 			} else if n == 0 && err != nil {
 				break
@@ -223,7 +219,6 @@ func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
 				result = append(result, seq)
 			}
 		}
-		ir.ni.locks[bkey].Unlock()
 	}
 
 	return ir.getWordsFromSeq(result...)

@@ -42,12 +42,21 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	if err != nil {
 		return nil, err
 	}
+	done := [512]chan struct{}{}
+	writes := [512]chan [1088]byte{}
+	for i := range 512 {
+		writes[i] = make(chan [1088]byte, workersCount)
+		done[i] = make(chan struct{})
+	}
 	ir := &IndexRepository{
 		DB: db,
 		log: log,
 		mu: new(sync.Mutex),
 		ni: NewWordIndex(58, uint32(workersCount)),
-		si: &shingleIndex{},
+		si: &shingleIndex{
+			writes: writes,
+			done: done,
+		},
 		path: path,
 		ctx: ctx,
 	}
@@ -68,12 +77,18 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	backupWg.Go(func() {
 		<-ctx.Done()
 		ir.ni.saveBloom(ir.path)
+		ir.si.stop()
 		ir.UpdateIndexC(atomic.LoadUint32(&c))
 	})
 
 	for i := range shardSize {
 		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
 	}
+
+	for i := range 512 {
+		go ir.shingleWorker(i)
+	}
+
 	return ir, nil
 }
 

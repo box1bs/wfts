@@ -3,6 +3,7 @@ BINARY_NAME=wfts
 CONFIG_PATH=./configs/default.json
 LOCAL_BIN_PATH=.data/
 IMAGE_NAME=wfts
+HOST_PORT=80
 
 build: test
 	go build -o ./.bin/${BINARY_NAME} ./cmd/app/main.go
@@ -26,7 +27,7 @@ docker-build:
 	docker build -t ${IMAGE_NAME} .
 
 docker-run:
-	docker run -p 3000:8080 -v ${LOCAL_BIN_PATH}:/app/.data ${IMAGE_NAME}
+	docker run -p ${HOST_PORT}:8080 -v .scratches:/app/.scratches -v ${LOCAL_BIN_PATH}:/app/.data ${IMAGE_NAME}
 
 cleard:
 	rm -rf ${LOCAL_BIN_PATH}

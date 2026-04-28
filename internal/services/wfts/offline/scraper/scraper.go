@@ -89,16 +89,16 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 		cfg:       cfg,
 		lru:       lrucache.NewLRUCache(cfg.WorkersNum * 10),
 		rlCache:   lrucache.NewLRUCache(cfg.WorkersNum * 25),
-		rulesCache:lrucache.NewLRUCache(cfg.WorkersNum * 25),
+		rulesCache:lrucache.NewLRUCache(cfg.WorkersNum * 10),
 		mu: 	   &sync.Mutex{},
 		globalCtx: c,
 	}
-	ws.pool = scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum*50)
+	ws.pool = scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum*25)
 	return ws
 }
 
 func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *linkToken {
-	out := make(chan *linkToken, ws.cfg.WorkersNum*25)
+	out := make(chan *linkToken, ws.cfg.WorkersNum*10)
 	go func() {
 		for {
 			select {
