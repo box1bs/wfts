@@ -39,7 +39,7 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	opts.BlockCacheSize = 32 << 20 // 32 MB
 	opts.IndexCacheSize = 16 << 20 // 16 MB
 	opts.ValueLogFileSize = 128 << 20 // 128 MB
-	opts.NumCompactors = 1
+	opts.NumCompactors = 2
 	db, err := badger.Open(opts.WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
