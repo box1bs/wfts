@@ -63,7 +63,7 @@ func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 			logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
 			return fmt.Errorf("page already indexed")
 		}
-		if err := idx.repository.IndexDocShingles(sign); err != nil {
+		if err := idx.repository.IndexDocShingles(sign); err != nil && err != context.Canceled {
 			return err
 		}
 	}
@@ -77,19 +77,19 @@ func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return err
 	}
 	if skipIndexAdding {
-		logger.Debugf("potentially garbage link")
+		logger.Debugf("skipped by model decision")
 		return fmt.Errorf("skipped by model decision")
 	}
 	if err := idx.repository.SaveDocument(doc); err != nil {
 		logger.Errorf("error saving document: %v", err)
 		return err
 	}
-	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil {
-		logger.Errorf("error indexing ngrams: %v", err)
-		return err
-	}
 	if err := idx.repository.IndexDocumentWords(doc.Id, stem, pos); err != nil {
 		logger.Errorf("error indexing document words: %v", err)
+		return err
+	}
+	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil && err != context.Canceled {
+		logger.Errorf("error indexing ngrams: %v", err)
 		return err
 	}
 

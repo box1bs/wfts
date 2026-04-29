@@ -11,7 +11,6 @@ import (
 const (
 	shPath = "/shingles/chunk%d.bin"
 	ngPath = "/ngs/ng%d.bin"
-	BloomPath = "/bloom.bin"
 	wordKey = "word:%s"
 	seqKey = "num:%d"
 	inck = "inc:"

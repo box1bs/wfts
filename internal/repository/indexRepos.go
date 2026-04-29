@@ -54,7 +54,7 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 		DB: db,
 		log: log,
 		mu: new(sync.Mutex),
-		ni: NewWordIndex(58, uint32(workersCount)),
+		ni: NewWordIndex(uint32(workersCount)),
 		si: &shingleIndex{
 			writes: writes,
 			done: done,
@@ -68,9 +68,6 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	if err := os.MkdirAll(filepath.Join(path, "/shingles"), 0755); err != nil {
 		return nil, err
 	}
-	if err := ir.ni.loadBloom(path); err != nil {
-		return nil, err
-	}
 	c, err := ir.LoadIndexC()
 	if err != nil {
 		return nil, err
@@ -78,7 +75,6 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 
 	backupWg.Go(func() {
 		<-ctx.Done()
-		ir.ni.saveBloom(ir.path)
 		ir.si.stop()
 		ir.UpdateIndexC(atomic.LoadUint32(&c))
 	})
@@ -269,26 +265,27 @@ func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys
 			return
 		default:
 		}
-		var idx uint32
+		seq := &sequence{}
 		if val := cacheSys.Get(entry.word); val == nil {
 			key := fmt.Appendf(nil, wordKey, entry.word)
 			if err := ir.DB.Update(func(txn *badger.Txn) error {
 				it, err := txn.Get(key)
 				if err == nil {
 					it.Value(func(val []byte) error {
-						idx = binary.LittleEndian.Uint32(val)
+						seq.id = binary.LittleEndian.Uint32(val)
+						seq.loaded = true
 						return nil
 					})
 					return nil
 				}
 
 				data := [4]byte{}
-				idx = atomic.AddUint32(startPos, 1)
-				binary.LittleEndian.PutUint32(data[:], idx)
+				seq.id = atomic.AddUint32(startPos, 1)
+				binary.LittleEndian.PutUint32(data[:], seq.id)
 				if err := txn.Set(key, data[:]); err != nil {
 					return err
 				}
-				if err := txn.Set(fmt.Appendf(nil, seqKey, idx), []byte(entry.word)); err != nil {
+				if err := txn.Set(fmt.Appendf(nil, seqKey, seq.id), []byte(entry.word)); err != nil {
 					return err
 				}
 				return nil
@@ -296,11 +293,12 @@ func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys
 				ir.log.Errorf("allocation failed: %v", err)
 				return
 			}
-			cacheSys.Put(entry.word, idx)
+			cacheSys.Put(entry.word, seq)
 		} else {
-			idx = val.(uint32)
+			*seq = *val.(*sequence)
+			seq.loaded = true
 		}
-		entry.seqC <- idx
+		entry.seqC <- seq
 	}
 }
 
