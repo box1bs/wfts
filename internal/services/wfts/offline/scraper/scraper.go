@@ -87,13 +87,13 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 		},
 		visited:   new(sync.Map),
 		cfg:       cfg,
-		lru:       lrucache.NewLRUCache(cfg.WorkersNum * 10),
+		lru:       lrucache.NewLRUCache(cfg.WorkersNum * 25),
 		rlCache:   lrucache.NewLRUCache(cfg.WorkersNum * 25),
 		rulesCache:lrucache.NewLRUCache(cfg.WorkersNum * 10),
 		mu: 	   &sync.Mutex{},
 		globalCtx: c,
 	}
-	ws.pool = scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum*25)
+	ws.pool = scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum*50)
 	return ws
 }
 

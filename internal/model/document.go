@@ -29,6 +29,10 @@ type CrawlFeatures struct {
 type CrawlState struct {
 	LastStart 	string
 	Uptime 		string
+	Allocated 	uint64
+	MemFromOS 	uint64
+	HeapIdle 	uint64
+	HeapInUse	uint64
 	DocsInIndex int
 	IsRunning 	bool
 }

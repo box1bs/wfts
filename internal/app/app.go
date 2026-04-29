@@ -112,9 +112,16 @@ func (f *Factory) GetCurrentState() (*model.CrawlState, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
 	return &model.CrawlState{
 		LastStart: f.startPoint.Format("15:04:05 01-02-2006"),
 		Uptime: f.getUptimeTime().String(),
+		Allocated: mem.Alloc,
+		MemFromOS: mem.Sys,
+		HeapIdle: mem.HeapIdle,
+		HeapInUse: mem.HeapInuse,
 		DocsInIndex: docs,
 		IsRunning: f.isRunning(),
 	}, nil
