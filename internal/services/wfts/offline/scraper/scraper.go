@@ -178,13 +178,6 @@ func (ws *WebScraper) dispatch(urls chan *linkToken) {
 			return
 
 		case uri := <-urls:
-			normalized, err := normalizeUrl(uri.Link)
-			if err != nil {
-				continue
-			}
-			if _, load := ws.visited.Load(normalized); load {
-				continue
-			}
 			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 				ReplaceAttr: model.Replacer,
 				Level:       slog.LevelDebug,

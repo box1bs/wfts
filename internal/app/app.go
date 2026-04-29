@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 	"wfts/configs"
@@ -47,9 +49,17 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	}
 	f.searcher = searcher.NewSearcher(f.indexer)
 	f.complCh = make(chan string, config.WorkersCount * capacityMult)
+	t := time.NewTicker(5 * time.Minute)
 	go func() {
 		<-outerCtx.Done()
 		close(f.complCh)
+		t.Stop()
+	}()
+	go func() {
+		for range t.C {
+			runtime.GC()
+			debug.FreeOSMemory()
+		}
 	}()
 	return f, nil
 }
