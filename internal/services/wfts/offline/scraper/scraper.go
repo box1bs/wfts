@@ -93,12 +93,16 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 		mu: 	   &sync.Mutex{},
 		globalCtx: c,
 	}
-	ws.pool = scheduler.NewWorkerPool(cfg.WorkersNum, cfg.WorkersNum*50)
+	stack, err := InitStack(cfg.ScratchPath, 64 << 20)
+	if err != nil {
+		panic(err)
+	}
+	ws.pool = scheduler.NewWorkerPool(stack, ws.Packed, cfg.WorkersNum, cfg.WorkersNum*50)
 	return ws
 }
 
-func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *linkToken {
-	out := make(chan *linkToken, ws.cfg.WorkersNum*10)
+func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *model.LinkToken {
+	out := make(chan *model.LinkToken, ws.cfg.WorkersNum*10)
 	go func() {
 		for {
 			select {
@@ -113,7 +117,7 @@ func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *linkToken {
 				if err != nil {
 					continue
 				}
-				out <- &linkToken{
+				out <- &model.LinkToken{
 					Link:     parsed,
 					Priority: 1,
 				}
@@ -123,7 +127,7 @@ func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *linkToken {
 	return out
 }
 
-func (ws *WebScraper) Run(urls chan *linkToken) error {
+func (ws *WebScraper) Run(urls chan *model.LinkToken) error {
 	if err := ws.LoadVisitedUrls(ws.visited); err != nil {
 		return err
 	}
@@ -139,28 +143,9 @@ func (ws *WebScraper) Run(urls chan *linkToken) error {
 			if err != nil {
 				continue
 			}
-			urls <- &linkToken{
+			urls <- &model.LinkToken{
 				Link:     parsed,
 				Priority: 1,
-			}
-		}
-		links, _ := ws.fromScratchMark()
-		p, len := 0, len(links)
-		t := time.NewTicker(time.Millisecond * 500)
-		defer t.Stop()
-
-		for range t.C {
-			if p == len {
-				return
-			}
-
-			select {
-			case <-ws.globalCtx.Done():
-				return
-			case urls <- links[p]:
-				p++
-			default:
-
 			}
 		}
 	}()
@@ -168,38 +153,40 @@ func (ws *WebScraper) Run(urls chan *linkToken) error {
 	ws.dispatch(urls)
 	ws.pool.Wait()
 	ws.pool.Stop()
-	return ws.makeScratchMark(ws.pool.Backup())
+	return nil
 }
 
-func (ws *WebScraper) dispatch(urls chan *linkToken) {
+func (ws *WebScraper) dispatch(urls chan *model.LinkToken) {
 	for {
 		select {
 		case <-ws.globalCtx.Done():
 			return
 
 		case uri := <-urls:
-			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
-				ReplaceAttr: model.Replacer,
-				Level:       slog.LevelDebug,
-			})).With(
-				slog.Group("node_properties",
-					slog.String("url", uri.Link.String()),
-					slog.Int("depth", uri.Depth),
-					slog.Float64("priority", uri.Priority),
-				),
-			))
-			ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
-				ws.rlCache.Put(uri.Link.Hostname(), NewRateLimiter(DefaultDelay))
-				ctx, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
-				defer cancel()
-				return ws.ScrapeWithContext(ctx, uri)
-			}, Priority: uri.Priority, CrawlToken: uri})
+			ws.pool.Submit(&model.CrawlNode{Priority: uri.Priority, CrawlToken: uri})
 
 		}
 	}
 }
 
-func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken) model.CompletionState {
+func (ws *WebScraper) Packed(node *model.CrawlNode) model.CompletionState {
+	link := node.CrawlToken.(*model.LinkToken)
+	log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
+		ReplaceAttr: model.Replacer,
+		Level:       slog.LevelDebug,
+	})).With(
+		slog.Group("node_properties",
+			slog.String("url", link.Link.String()),
+			slog.Int("depth", link.Depth),
+			slog.Float64("priority", link.Priority),
+		),
+	))
+	c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
+	defer cancel()
+	return ws.ScrapeWithContext(c, link)
+}
+
+func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.LinkToken) model.CompletionState {
 	if ws.checkContext(ctx) {
 		return model.Canceled
 	}
@@ -241,7 +228,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 			load = true
 			ws.visited.Swap(normalized, curLink.Depth)
 			if v := ws.lru.Get(hashed); v != nil {
-				links = v.([]*linkToken)
+				links = v.([]*model.LinkToken)
 			} else {
 				encoded, err := ws.GetPageUrlsByHash(hashed)
 				if err != nil {
@@ -299,23 +286,9 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 		if link.SameDomain {
 			link.Priority *= 2
 		}
-		link.Priority = link.Priority / (float64(curLink.Depth) + 1) * (curLink.Priority * 10) * math.Exp(-0.6*float64(visPenalty))
+		link.Priority = link.Priority / curLink.Priority * math.Exp(-0.6*float64(visPenalty))
 
-		ws.pool.Submit(&model.CrawlNode{Activation: func() model.CompletionState {
-			log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
-				ReplaceAttr: model.Replacer,
-				Level:       slog.LevelDebug,
-			})).With(
-				slog.Group("node_properties",
-					slog.String("url", link.Link.String()),
-					slog.Int("depth", link.Depth),
-					slog.Float64("priority", link.Priority),
-				),
-			))
-			c, cancel := context.WithTimeout(context.WithValue(ws.globalCtx, model.DefLogKey, log), crawlTime)
-			defer cancel()
-			return ws.ScrapeWithContext(c, link)
-		},
+		ws.pool.Submit(&model.CrawlNode{
 			Priority:   link.Priority,
 			CrawlToken: link,
 		})
@@ -323,18 +296,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *linkToken)
 	return model.Done
 }
 
-func (ws *WebScraper) makeScratchMark(toMark []any) error {
-	var buf bytes.Buffer
-	for _, t := range toMark {
-		token := t.(*linkToken)
-		if _, err := fmt.Fprintf(&buf, "%s|%.16f|%d\n", token.Link.String(), token.Priority, token.Depth); err != nil {
-			return err
-		}
-	}
-	return os.WriteFile(ws.cfg.ScratchPath, buf.Bytes(), 0600)
-}
-
-func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {
+func (ws *WebScraper) fromScratchMark() ([]*model.LinkToken, error) {
 	file, err := os.OpenFile(ws.cfg.ScratchPath, os.O_RDONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, err
@@ -352,13 +314,13 @@ func (ws *WebScraper) fromScratchMark() ([]*linkToken, error) {
 	saved := string(data[:len(data)-1])
 	tokens := strings.Split(saved, "\n")
 	tlen := len(tokens)
-	result := make([]*linkToken, 0)
+	result := make([]*model.LinkToken, 0)
 	for i := range tlen {
 		parts := strings.Split(tokens[i], "|")
 		if len(parts) != 3 {
 			return nil, fmt.Errorf("invalid backup format")
 		}
-		token := linkToken{}
+		token := model.LinkToken{}
 		token.Link, err = url.Parse(parts[0])
 		if err != nil {
 			return nil, err

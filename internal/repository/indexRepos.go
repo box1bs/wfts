@@ -40,6 +40,12 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	opts.IndexCacheSize = 16 << 20 // 16 MB
 	opts.ValueLogFileSize = 64 << 20 // 64 MB
 	opts.NumCompactors = 2
+
+	opts.MemTableSize = 16 << 20
+	opts.NumMemtables = 3
+	
+	opts.NumLevelZeroTables = 2
+	opts.NumLevelZeroTablesStall = 5
 	db, err := badger.Open(opts.WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err

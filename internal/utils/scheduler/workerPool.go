@@ -2,11 +2,14 @@ package scheduler
 
 import (
 	"sync"
-	
+	"time"
+
 	"wfts/internal/model"
 )
 
 type WorkerPool struct {
+	collection 	Stack
+	act 		func(*model.CrawlNode) model.CompletionState
 	buf 		chan struct{}
 	quit      	chan struct{}
 	collector 	chan any
@@ -15,11 +18,12 @@ type WorkerPool struct {
 	mu 			*sync.Mutex
 }
 
-func NewWorkerPool(size, queueCapacity int) *WorkerPool {
+func NewWorkerPool(st Stack, activation func(*model.CrawlNode) model.CompletionState, size, queueCapacity int) *WorkerPool {
 	wp := &WorkerPool{
+		collection: 	st,
+		act: 			activation,
 		buf: 			make(chan struct{}, queueCapacity),
 		quit:      		make(chan struct{}),
-		collector: 		make(chan any, queueCapacity),
 		heap: 			NewMinMaxHeap(),
 		wg:        		new(sync.WaitGroup),
 		mu:				new(sync.Mutex),
@@ -30,13 +34,18 @@ func NewWorkerPool(size, queueCapacity int) *WorkerPool {
 	return wp
 }
 
+func (wp *WorkerPool) heapAct(cn *model.CrawlNode) model.CompletionState {
+	wp.wg.Done()
+	return wp.act(cn)
+}
+
+type Stack interface {
+	Push([]byte) error
+	Pop() ([]byte, error)
+	Close() error
+}
+
 func (wp *WorkerPool) Submit(task *model.CrawlNode) {
-	orig := task.Activation
-	task.Activation = func() model.CompletionState {
-		defer wp.wg.Done()
-		return orig()
-	}
-	
 	wp.mu.Lock()
 	select {
 	case wp.buf <- struct{}{}:
@@ -48,6 +57,13 @@ func (wp *WorkerPool) Submit(task *model.CrawlNode) {
 		if worstTask, exist := wp.heap.GetMin(); exist && task.Priority > worstTask.Value.Priority {
 			wp.heap.DeleteMin()
 			wp.heap.Insert(task)
+			if data, err := worstTask.Value.CrawlToken.Serialize(); err == nil {
+				wp.collection.Push(data)
+			}
+		} else if exist {
+			if data, err := task.CrawlToken.Serialize(); err == nil {
+				wp.collection.Push(data)
+			}
 		}
 		wp.mu.Unlock()
 	}
@@ -65,17 +81,12 @@ func (wp *WorkerPool) worker() {
 			if exist {
 				wp.heap.DeleteMax()
 				wp.mu.Unlock()
-				if task.Value.Activation() == model.Canceled {
-					select {
-					case wp.collector <- task.Value.CrawlToken:
-					case <-wp.collector:
-						select {
-							case wp.collector <- task.Value.CrawlToken: // - можно гарантировать добавление конкретного элемента в буффер? - можно, а зачем?
-							default:
-
-						}
-
+				if wp.heapAct(task.Value) == model.Canceled {
+					data, err := task.Value.CrawlToken.Serialize()
+					if err != nil {
+						continue
 					}
+					wp.collection.Push(data)
 				}
 				continue
 			}
@@ -88,22 +99,31 @@ func (wp *WorkerPool) worker() {
 
 		case <-wp.quit:
 			return
+
+		case <-time.After(30 * time.Second):
+			wp.mu.Lock()
+			node, err := wp.collection.Pop()
+			wp.mu.Unlock()
+			if err == nil {
+				if token, err := model.DeserializeToken(node); err == nil {
+					wp.act(&model.CrawlNode{ 
+						CrawlToken: token,
+						Priority: token.Priority,
+					})
+				} else {panic(err)}
+				continue
+			} else {panic(err)}
 		}
 	}
 }
 
-func (wp *WorkerPool) Backup() []any {
-	defer close(wp.collector)
-	canceleds := wp.heap.tokens()
-	for {
-		select {
-		case token := <-wp.collector:
-			canceleds = append(canceleds, token)
-
-		default:
-			return canceleds
-
+func (wp *WorkerPool) backup() {
+	for _, token := range wp.heap.tokens() {
+		serialized, err := token.(*model.CrawlNode).CrawlToken.Serialize()
+		if err != nil {
+			continue
 		}
+		wp.collection.Push(serialized)
 	}
 }
 
@@ -115,4 +135,6 @@ func (wp *WorkerPool) Stop() {
 	close(wp.quit)
 	close(wp.buf)
 	wp.Wait()
+	wp.backup()
+	wp.collection.Close()
 }

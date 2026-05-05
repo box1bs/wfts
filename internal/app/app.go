@@ -40,6 +40,7 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	repos, err := repository.NewIndexRepository(outerCtx, wg, config.IndexPath, config.WorkersCount, outerCtx.Value(model.DefLogKey).(*model.Logger), func(i int) repository.Cacher {
 		return lru.NewLRUCache(i)
 	})
+	debug.SetMemoryLimit(600 << 20)
 	if err != nil {
 		return nil, err
 	}
@@ -49,17 +50,9 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	}
 	f.searcher = searcher.NewSearcher(f.indexer)
 	f.complCh = make(chan string, config.WorkersCount * capacityMult)
-	t := time.NewTicker(5 * time.Minute)
 	go func() {
 		<-outerCtx.Done()
 		close(f.complCh)
-		t.Stop()
-	}()
-	go func() {
-		for range t.C {
-			runtime.GC()
-			debug.FreeOSMemory()
-		}
 	}()
 	return f, nil
 }
@@ -118,10 +111,10 @@ func (f *Factory) GetCurrentState() (*model.CrawlState, error) {
 	return &model.CrawlState{
 		LastStart: f.startPoint.Format("15:04:05 01-02-2006"),
 		Uptime: f.getUptimeTime().String(),
-		Allocated: mem.Alloc,
-		MemFromOS: mem.Sys,
-		HeapIdle: mem.HeapIdle,
-		HeapInUse: mem.HeapInuse,
+		Allocated: mem.Alloc >> 20,
+		MemFromOS: mem.Sys >> 20,
+		HeapIdle: mem.HeapIdle >> 20,
+		HeapInUse: mem.HeapInuse >> 20,
 		DocsInIndex: docs,
 		IsRunning: f.isRunning(),
 	}, nil
