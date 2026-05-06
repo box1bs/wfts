@@ -100,7 +100,7 @@ func (wp *WorkerPool) worker() {
 		case <-wp.quit:
 			return
 
-		case <-time.After(30 * time.Second):
+		case <-time.After(10 * time.Second):
 			wp.mu.Lock()
 			node, err := wp.collection.Pop()
 			wp.mu.Unlock()
