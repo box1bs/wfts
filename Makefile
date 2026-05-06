@@ -27,7 +27,7 @@ docker-build:
 	docker build -t ${IMAGE_NAME} .
 
 docker-run:
-	docker run -p ${HOST_PORT}:8080 -v .scratches:/app/.scratches -v ${LOCAL_BIN_PATH}:/app/.data ${IMAGE_NAME}
+	docker run --user $(id -u):$(id -g) -p ${HOST_PORT}:8080 -v ${LOCAL_BIN_PATH}:/app/.data ${IMAGE_NAME}
 
 cleard:
 	rm -rf ${LOCAL_BIN_PATH}

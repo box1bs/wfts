@@ -6,8 +6,7 @@ import (
 )
 
 type Item struct {
-	Priority float64
-	Value    *model.CrawlNode
+	Value    *model.LinkToken
 }
 
 type minMaxHeap struct {
@@ -15,10 +14,10 @@ type minMaxHeap struct {
 	data []Item
 }
 
-func (h *minMaxHeap) tokens() []any {
-	values := make([]any, h.len)
+func (h *minMaxHeap) tokens() []*model.LinkToken {
+	values := make([]*model.LinkToken, h.len)
 	for i := range h.len {
-		values = append(values, h.data[i].Value.CrawlToken)
+		values = append(values, h.data[i].Value)
 	}
 	return values
 }
@@ -27,8 +26,8 @@ func NewMinMaxHeap() *minMaxHeap {
 	return &minMaxHeap{}
 }
 
-func (h *minMaxHeap) Insert(v *model.CrawlNode) {
-	h.data = append(h.data, Item{v.Priority, v})
+func (h *minMaxHeap) Insert(v *model.LinkToken) {
+	h.data = append(h.data, Item{v})
 	h.bubbleUp(len(h.data) - 1)
 	h.len++
 }
@@ -48,7 +47,7 @@ func (h *minMaxHeap) GetMax() (Item, bool) {
 	if n == 1 {
 		return h.data[0], true
 	}
-	if n == 2 || h.data[1].Priority > h.data[2].Priority {
+	if n == 2 || h.data[1].Value.Priority > h.data[2].Value.Priority {
 		return h.data[1], true
 	}
 	return h.data[2], true
@@ -79,7 +78,7 @@ func (h *minMaxHeap) DeleteMax() (Item, bool) {
 	var idx int
 	if n == 1 {
 		idx = 0
-	} else if n == 2 || h.data[1].Priority > h.data[2].Priority {
+	} else if n == 2 || h.data[1].Value.Priority > h.data[2].Value.Priority {
 		idx = 1
 	} else {
 		idx = 2
@@ -110,14 +109,14 @@ func (h *minMaxHeap) bubbleUp(i int) {
 	p := (i - 1) / 2
 
 	if isMinLevel(i) {
-		if h.data[i].Priority > h.data[p].Priority {
+		if h.data[i].Value.Priority > h.data[p].Value.Priority {
 			h.swap(i, p)
 			h.bubbleUpMax(p)
 		} else {
 			h.bubbleUpMin(i)
 		}
 	} else {
-		if h.data[i].Priority < h.data[p].Priority {
+		if h.data[i].Value.Priority < h.data[p].Value.Priority {
 			h.swap(i, p)
 			h.bubbleUpMin(p)
 		} else {
@@ -129,7 +128,7 @@ func (h *minMaxHeap) bubbleUp(i int) {
 func (h *minMaxHeap) bubbleUpMin(i int) {
 	for i >= 3 {
 		gp := (i - 3) / 4
-		if h.data[i].Priority < h.data[gp].Priority {
+		if h.data[i].Value.Priority < h.data[gp].Value.Priority {
 			h.swap(i, gp)
 			i = gp
 		} else {
@@ -141,7 +140,7 @@ func (h *minMaxHeap) bubbleUpMin(i int) {
 func (h *minMaxHeap) bubbleUpMax(i int) {
 	for i >= 3 {
 		gp := (i - 3) / 4
-		if h.data[i].Priority > h.data[gp].Priority {
+		if h.data[i].Value.Priority > h.data[gp].Value.Priority {
 			h.swap(i, gp)
 			i = gp
 		} else {
@@ -166,10 +165,10 @@ func (h *minMaxHeap) trickleDownMin(i int) {
 		}
 
 		if isGrandchild(i, m) {
-			if h.data[m].Priority < h.data[i].Priority {
+			if h.data[m].Value.Priority < h.data[i].Value.Priority {
 				h.swap(i, m)
 				p := (m - 1) / 2
-				if h.data[m].Priority > h.data[p].Priority {
+				if h.data[m].Value.Priority > h.data[p].Value.Priority {
 					h.swap(m, p)
 				}
 				i = m
@@ -177,7 +176,7 @@ func (h *minMaxHeap) trickleDownMin(i int) {
 				return
 			}
 		} else {
-			if h.data[m].Priority < h.data[i].Priority {
+			if h.data[m].Value.Priority < h.data[i].Value.Priority {
 				h.swap(i, m)
 			}
 			return
@@ -193,10 +192,10 @@ func (h *minMaxHeap) trickleDownMax(i int) {
 		}
 
 		if isGrandchild(i, m) {
-			if h.data[m].Priority > h.data[i].Priority {
+			if h.data[m].Value.Priority > h.data[i].Value.Priority {
 				h.swap(i, m)
 				p := (m - 1) / 2
-				if h.data[m].Priority < h.data[p].Priority {
+				if h.data[m].Value.Priority < h.data[p].Value.Priority {
 					h.swap(m, p)
 				}
 				i = m
@@ -204,7 +203,7 @@ func (h *minMaxHeap) trickleDownMax(i int) {
 				return
 			}
 		} else {
-			if h.data[m].Priority > h.data[i].Priority {
+			if h.data[m].Value.Priority > h.data[i].Value.Priority {
 				h.swap(i, m)
 			}
 			return
@@ -235,8 +234,8 @@ func (h *minMaxHeap) extremeDescendant(i int, min bool) int {
 			continue
 		}
 		if best == -1 ||
-			(min && h.data[idx].Priority < h.data[best].Priority) ||
-			(!min && h.data[idx].Priority > h.data[best].Priority) {
+			(min && h.data[idx].Value.Priority < h.data[best].Value.Priority) ||
+			(!min && h.data[idx].Value.Priority > h.data[best].Value.Priority) {
 			best = idx
 		}
 	}

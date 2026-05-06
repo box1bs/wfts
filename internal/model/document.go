@@ -89,15 +89,6 @@ func DeserializeToken(data []byte) (*LinkToken, error) {
 	return lt, nil
 }
 
-type CrawlNode struct {
-	CrawlToken  Serializable
-	Priority 	float64
-}
-
-type Serializable interface {
-	Serialize() ([]byte, error)
-}
-
 type CompletionState int
 const (
 	Done CompletionState = iota

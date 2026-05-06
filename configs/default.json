@@ -30,7 +30,7 @@
         "https://slashdot.org"
     ],
     "info_log_path" : "",
-    "backup_path" : "./.data/.canceled.bin",
+    "backup_path" : "./.data/queue.bin",
     "index_path" : "./.data",
     "worker_count" : 40,
     "max_depth_crawl" : 8,

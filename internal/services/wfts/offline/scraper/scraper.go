@@ -163,14 +163,13 @@ func (ws *WebScraper) dispatch(urls chan *model.LinkToken) {
 			return
 
 		case uri := <-urls:
-			ws.pool.Submit(&model.CrawlNode{Priority: uri.Priority, CrawlToken: uri})
+			ws.pool.Submit(uri)
 
 		}
 	}
 }
 
-func (ws *WebScraper) Packed(node *model.CrawlNode) model.CompletionState {
-	link := node.CrawlToken.(*model.LinkToken)
+func (ws *WebScraper) Packed(link *model.LinkToken) model.CompletionState {
 	log := model.NewLogger(slog.New(slog.NewJSONHandler(ws.cfg.LogOutput, &slog.HandlerOptions{
 		ReplaceAttr: model.Replacer,
 		Level:       slog.LevelDebug,
@@ -288,10 +287,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 		}
 		link.Priority = link.Priority / curLink.Priority * math.Exp(-0.6*float64(visPenalty))
 
-		ws.pool.Submit(&model.CrawlNode{
-			Priority:   link.Priority,
-			CrawlToken: link,
-		})
+		ws.pool.Submit(link)
 	}
 	return model.Done
 }

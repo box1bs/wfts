@@ -9,7 +9,7 @@ import (
 
 type WorkerPool struct {
 	collection 	Stack
-	act 		func(*model.CrawlNode) model.CompletionState
+	act 		func(*model.LinkToken) model.CompletionState
 	buf 		chan struct{}
 	quit      	chan struct{}
 	collector 	chan any
@@ -18,7 +18,7 @@ type WorkerPool struct {
 	mu 			*sync.Mutex
 }
 
-func NewWorkerPool(st Stack, activation func(*model.CrawlNode) model.CompletionState, size, queueCapacity int) *WorkerPool {
+func NewWorkerPool(st Stack, activation func(*model.LinkToken) model.CompletionState, size, queueCapacity int) *WorkerPool {
 	wp := &WorkerPool{
 		collection: 	st,
 		act: 			activation,
@@ -34,7 +34,7 @@ func NewWorkerPool(st Stack, activation func(*model.CrawlNode) model.CompletionS
 	return wp
 }
 
-func (wp *WorkerPool) heapAct(cn *model.CrawlNode) model.CompletionState {
+func (wp *WorkerPool) heapAct(cn *model.LinkToken) model.CompletionState {
 	wp.wg.Done()
 	return wp.act(cn)
 }
@@ -45,7 +45,7 @@ type Stack interface {
 	Close() error
 }
 
-func (wp *WorkerPool) Submit(task *model.CrawlNode) {
+func (wp *WorkerPool) Submit(task *model.LinkToken) {
 	wp.mu.Lock()
 	select {
 	case wp.buf <- struct{}{}:
@@ -57,11 +57,11 @@ func (wp *WorkerPool) Submit(task *model.CrawlNode) {
 		if worstTask, exist := wp.heap.GetMin(); exist && task.Priority > worstTask.Value.Priority {
 			wp.heap.DeleteMin()
 			wp.heap.Insert(task)
-			if data, err := worstTask.Value.CrawlToken.Serialize(); err == nil {
+			if data, err := worstTask.Value.Serialize(); err == nil {
 				wp.collection.Push(data)
 			}
 		} else if exist {
-			if data, err := task.CrawlToken.Serialize(); err == nil {
+			if data, err := task.Serialize(); err == nil {
 				wp.collection.Push(data)
 			}
 		}
@@ -82,7 +82,7 @@ func (wp *WorkerPool) worker() {
 				wp.heap.DeleteMax()
 				wp.mu.Unlock()
 				if wp.heapAct(task.Value) == model.Canceled {
-					data, err := task.Value.CrawlToken.Serialize()
+					data, err := task.Value.Serialize()
 					if err != nil {
 						continue
 					}
@@ -106,10 +106,7 @@ func (wp *WorkerPool) worker() {
 			wp.mu.Unlock()
 			if err == nil {
 				if token, err := model.DeserializeToken(node); err == nil {
-					wp.act(&model.CrawlNode{ 
-						CrawlToken: token,
-						Priority: token.Priority,
-					})
+					wp.act(token)
 				} else {panic(err)}
 				continue
 			} else {panic(err)}
@@ -119,7 +116,7 @@ func (wp *WorkerPool) worker() {
 
 func (wp *WorkerPool) backup() {
 	for _, token := range wp.heap.tokens() {
-		serialized, err := token.(*model.CrawlNode).CrawlToken.Serialize()
+		serialized, err := token.Serialize()
 		if err != nil {
 			continue
 		}
