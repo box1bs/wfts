@@ -91,9 +91,13 @@ func (f *Factory) StartCrawling(outerCtx context.Context, config *configs.Config
 	if f.isRunning() {
 		return errors.New(isExist)
 	}
+	var err error
 	f.startPoint = time.Now()
 	f.innerCtx, f.controller = context.WithCancel(outerCtx)
-	f.scraper = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.MaxDepth, config.OnlySameDomain), f.indexer, f.innerCtx)
+	f.scraper, err = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.MaxDepth, config.OnlySameDomain), f.indexer, f.innerCtx)
+	if err != nil {
+		return err
+	}
 	f.backupWG.Go(func() {
 		f.scraper.Run(f.scraper.PrepareChan(f.complCh))
 	})

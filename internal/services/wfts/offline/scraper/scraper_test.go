@@ -27,7 +27,11 @@ func TestHtmlGetter(t *testing.T) {
     
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            html, err := NewScraper(&configData{}, nil, context.Background()).getHTML(context.Background(), tt.url, NewRateLimiter(1), 3)
+            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin"}, nil, context.Background())
+            if err != nil {
+                t.Fatalf("scraper initialization failed: %v", err)
+            }
+            html, err := ws.getHTML(context.Background(), tt.url, NewRateLimiter(1), 3)
             if err != nil {
                 t.Fatalf("getHTML(%q): %v", tt.url, err)
             }
@@ -100,7 +104,11 @@ func TestHaveSitemap(t *testing.T) {
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             parsed, _ := url.Parse(tt.input)
-            links, err := NewScraper(&configData{}, nil, context.Background()).haveSitemap(parsed)
+            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin"}, nil, context.Background())
+            if err != nil {
+                t.Fatalf("scraper initialization failed: %v", err)
+            }
+            links, err := ws.haveSitemap(parsed)
             if err != nil {
                 t.Fatalf("haveSitemap(%q): %v", tt.input, err)
             }

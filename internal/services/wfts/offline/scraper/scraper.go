@@ -4,13 +4,9 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/gob"
-	"fmt"
 	"io"
 	"log/slog"
 	"math"
-	"os"
-	"strconv"
-	"strings"
 
 	"wfts/internal/model"
 	lrucache "wfts/internal/services/wfts/offline/scraper/lruCache"
@@ -47,7 +43,7 @@ type WebScraper struct {
 
 type configData struct {
 	StartURLs      []string
-	ScratchPath    string
+	LocalCachePath string
 	LogOutput      io.Writer
 	WorkersNum     int
 	Depth          int
@@ -56,10 +52,10 @@ type configData struct {
 
 const canceled = "context canceled"
 
-func NewScrapeConfig(baseUrls []string, ScratchPath string, logWriter io.Writer, workerNum, depth int, onlySameDomain bool) *configData {
+func NewScrapeConfig(baseUrls []string, cachePath string, logWriter io.Writer, workerNum, depth int, onlySameDomain bool) *configData {
 	return &configData{
 		StartURLs:      baseUrls,
-		ScratchPath:    ScratchPath,
+		LocalCachePath: cachePath,
 		LogOutput:      logWriter,
 		WorkersNum:     workerNum,
 		Depth:          depth,
@@ -74,7 +70,7 @@ const (
 	numOfTries   = 3 // если кто то решил поменять это на 0, чтож, удачи
 )
 
-func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
+func NewScraper(cfg *configData, idx indexer, c context.Context) (*WebScraper, error) {
 	ws := &WebScraper{
 		indexer: idx,
 		client: &http.Client{
@@ -93,12 +89,12 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) *WebScraper {
 		mu: 	   &sync.Mutex{},
 		globalCtx: c,
 	}
-	stack, err := InitStack(cfg.ScratchPath, 64 << 20)
+	stack, err := InitStack(cfg.LocalCachePath, 64 << 20)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	ws.pool = scheduler.NewWorkerPool(stack, ws.Packed, cfg.WorkersNum, cfg.WorkersNum*50)
-	return ws
+	return ws, nil
 }
 
 func (ws *WebScraper) PrepareChan(rawUrls chan string) chan *model.LinkToken {
@@ -290,48 +286,6 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 		ws.pool.Submit(link)
 	}
 	return model.Done
-}
-
-func (ws *WebScraper) fromScratchMark() ([]*model.LinkToken, error) {
-	file, err := os.OpenFile(ws.cfg.ScratchPath, os.O_RDONLY|os.O_CREATE, 0600)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return nil, err
-	}
-	if len(data) == 0 {
-		return nil, nil
-	}
-
-	saved := string(data[:len(data)-1])
-	tokens := strings.Split(saved, "\n")
-	tlen := len(tokens)
-	result := make([]*model.LinkToken, 0)
-	for i := range tlen {
-		parts := strings.Split(tokens[i], "|")
-		if len(parts) != 3 {
-			return nil, fmt.Errorf("invalid backup format")
-		}
-		token := model.LinkToken{}
-		token.Link, err = url.Parse(parts[0])
-		if err != nil {
-			return nil, err
-		}
-		token.Priority, err = strconv.ParseFloat(parts[1], 64)
-		if err != nil {
-			return nil, err
-		}
-		token.Depth, err = strconv.Atoi(parts[2])
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, &token)
-	}
-	return result, nil
 }
 
 func (ws *WebScraper) checkContext(ctx context.Context) bool {
