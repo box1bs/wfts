@@ -31,6 +31,26 @@ func NewWorkerPool(st Stack, activation func(*model.LinkToken) model.CompletionS
 	for range size {
 		go wp.worker()
 	}
+	go func() {
+		t := time.NewTicker(30 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				wp.mu.Lock()
+				task, err := wp.collection.Pop()
+				wp.mu.Unlock()
+				if err == nil {
+					if token, err := model.DeserializeToken(task); err == nil {
+						wp.Submit(token)
+					}
+				}
+			case <-wp.quit:
+				return
+				
+			}
+		}
+	}()
 	return wp
 }
 
@@ -90,7 +110,14 @@ func (wp *WorkerPool) worker() {
 				}
 				continue
 			}
+
+			node, err := wp.collection.Pop()
 			wp.mu.Unlock()
+			if err == nil {
+				if token, err := model.DeserializeToken(node); err == nil {
+					wp.act(token)
+				}
+			}
 
 			select {
 			case wp.buf <- struct{}{}:
@@ -100,16 +127,6 @@ func (wp *WorkerPool) worker() {
 		case <-wp.quit:
 			return
 
-		case <-time.After(10 * time.Second):
-			wp.mu.Lock()
-			node, err := wp.collection.Pop()
-			wp.mu.Unlock()
-			if err == nil {
-				if token, err := model.DeserializeToken(node); err == nil {
-					wp.act(token)
-				} else {panic(err)}
-				continue
-			} else {panic(err)}
 		}
 	}
 }
