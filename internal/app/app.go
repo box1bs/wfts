@@ -151,6 +151,8 @@ func (f *Factory) StopCrawling(outerCtx context.Context) error {
 
 	log := outerCtx.Value(model.DefLogKey).(*model.Logger)
 	f.controller()
+	f.scraper = nil
+	f.innerCtx = nil
 	log.Infof("scraper stopping...")
 	return nil
 }

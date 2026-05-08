@@ -32,7 +32,7 @@ func NewWorkerPool(st Stack, activation func(*model.LinkToken) model.CompletionS
 		go wp.worker()
 	}
 	go func() {
-		t := time.NewTicker(30 * time.Second)
+		t := time.NewTicker(10 * time.Second)
 		defer t.Stop()
 		for {
 			select {
@@ -110,14 +110,7 @@ func (wp *WorkerPool) worker() {
 				}
 				continue
 			}
-
-			node, err := wp.collection.Pop()
 			wp.mu.Unlock()
-			if err == nil {
-				if token, err := model.DeserializeToken(node); err == nil {
-					wp.act(token)
-				}
-			}
 
 			select {
 			case wp.buf <- struct{}{}:

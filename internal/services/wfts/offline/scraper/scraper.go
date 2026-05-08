@@ -281,7 +281,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 		if link.SameDomain {
 			link.Priority *= 2
 		}
-		link.Priority = link.Priority / curLink.Priority * math.Exp(-0.6*float64(visPenalty))
+		link.Priority = link.Priority / (curLink.Priority * float64(curLink.Depth + (ws.cfg.Depth / 2))) * math.Exp(-0.6*float64(visPenalty))
 
 		ws.pool.Submit(link)
 	}
