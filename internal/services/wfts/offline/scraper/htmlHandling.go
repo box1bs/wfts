@@ -180,9 +180,10 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 							// isAncore = true
 							same := isSameOrigin(uri, baseURL)
 							if depth, vis := ws.visited.Load(normalized); vis {
-								if depth.(int) > currentDeep {
+								if depth.(int) >= currentDeep {
 									features.UrlCount++
 									visit = append(visit, &model.LinkToken{Link: uri, SameDomain: same})
+									ws.visited.Store(normalized, currentDeep + 1)
 								}
 								break
 							}

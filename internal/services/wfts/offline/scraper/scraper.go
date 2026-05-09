@@ -46,19 +46,17 @@ type configData struct {
 	LocalCachePath string
 	LogOutput      io.Writer
 	WorkersNum     int
-	Depth          int
 	OnlySameDomain bool
 }
 
 const canceled = "context canceled"
 
-func NewScrapeConfig(baseUrls []string, cachePath string, logWriter io.Writer, workerNum, depth int, onlySameDomain bool) *configData {
+func NewScrapeConfig(baseUrls []string, cachePath string, logWriter io.Writer, workerNum int, onlySameDomain bool) *configData {
 	return &configData{
 		StartURLs:      baseUrls,
 		LocalCachePath: cachePath,
 		LogOutput:      logWriter,
 		WorkersNum:     workerNum,
-		Depth:          depth,
 		OnlySameDomain: onlySameDomain,
 	}
 }
@@ -186,10 +184,6 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 		return model.Canceled
 	}
 
-	if curLink.Depth >= ws.cfg.Depth {
-		return model.Error
-	}
-
 	normalized, err := normalizeUrl(curLink.Link)
 	if err != nil {
 		return model.Error
@@ -210,7 +204,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
 	if log == nil {
-		return model.Canceled
+		return model.Done
 	}
 
 	priority := 1.0
@@ -240,12 +234,12 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 					ws.lru.Put(hashed, links)
 				}
 			}
-			visPenalty = ws.cfg.Depth - (prevDepth.(int) - curLink.Depth)
+			visPenalty = prevDepth.(int) - curLink.Depth
 		} else {
 			if links, err = ws.fetchHTMLcontent(ctx, &priority, curLink.Link, normalized, curLink.Depth); err != nil {
 				return model.Error
 			}
-			visPenalty = ws.cfg.Depth - (prevDepth.(int) - curLink.Depth)
+			visPenalty = prevDepth.(int) - curLink.Depth
 		}
 
 		if len(links) == 0 {
@@ -281,7 +275,10 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 		if link.SameDomain {
 			link.Priority *= 2
 		}
-		link.Priority = link.Priority / (curLink.Priority * float64(curLink.Depth + (ws.cfg.Depth / 2))) * math.Exp(-0.6*float64(visPenalty))
+		if visPenalty != 0 {
+			link.Priority *= 0.5
+		}
+		link.Priority = link.Priority / (curLink.Priority * float64(curLink.Depth + 1)) * math.Exp(-0.9*float64(visPenalty))
 
 		ws.pool.Submit(link)
 	}
