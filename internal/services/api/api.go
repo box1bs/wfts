@@ -55,7 +55,7 @@ func (s *server) Start() error {
 	defaultLogger := s.global.Value(model.DefLogKey).(*model.Logger)
 	mux.HandleFunc("POST /crawl/start", func(w http.ResponseWriter, r *http.Request) {
 		if err := s.factory.StartCrawling(s.global, s.cfg); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 

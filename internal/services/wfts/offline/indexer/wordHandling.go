@@ -53,20 +53,20 @@ func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	}
 
 	sim := 0.0
-	// if l := len(allWordTokens); !skipIndexAdding && l > 4 {
-	// 	sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
-	// 	conds, err := idx.repository.GetSimilarSigns(sign)
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	if sim = calcSim(sign, conds); sim > 0.8 {
-	// 		logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
-	// 		return fmt.Errorf("page already indexed")
-	// 	}
-	// 	if err := idx.repository.IndexDocShingles(sign); err != nil {
-	// 		return err
-	// 	}
-	// }
+	if l := len(allWordTokens); !skipIndexAdding && l > 4 {
+		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
+		conds, err := idx.repository.GetSimilarSigns(sign)
+		if err != nil {
+			return err
+		}
+		if sim = calcSim(sign, conds); sim > 0.8 {
+			logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
+			return fmt.Errorf("page already indexed")
+		}
+		if err := idx.repository.IndexDocShingles(sign); err != nil && err != context.Canceled {
+			return err
+		}
+	}
 
 	bigrams := make(map[[2]uint64]int)
 	for j := 1; j < len(allWordTokens); j++ {
@@ -77,24 +77,24 @@ func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return err
 	}
 	if skipIndexAdding {
-		logger.Debugf("potentially garbage link")
+		logger.Debugf("skipped by model decision")
 		return fmt.Errorf("skipped by model decision")
 	}
 	if err := idx.repository.SaveDocument(doc); err != nil {
 		logger.Errorf("error saving document: %v", err)
 		return err
 	}
-	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil {
-		logger.Errorf("error indexing ngrams: %v", err)
-		return err
-	}
 	if err := idx.repository.IndexDocumentWords(doc.Id, stem, pos); err != nil {
 		logger.Errorf("error indexing document words: %v", err)
 		return err
 	}
+	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil && err != context.Canceled {
+		logger.Errorf("error indexing ngrams: %v", err)
+		return err
+	}
 
-	*priority += math.Log(float64(utokens) + 1) + 1 // (1 + sameDomain) * (log(linksNumber + 1) + log(UniqTokenCount + 1) + 1) / ((parentDepth + 1) * (1 - simRate) * (log(tokenCount + 1) + 1)) * e**(-a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
-	*priority /= ((math.Log(float64(doc.TokenCount) + 1) + 1) * (1 - sim))
+	*priority *= (1 - sim)
+	*priority *= (float64(utokens) / float64(doc.TokenCount)) // (1 + sameDomain) * (log(linksNumber + 1) * (1 - simRate) * (UniqTokenCount / TokenCount) / (log(tokenCount + 1) + 1) * e**(a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
 	return nil
 }
 

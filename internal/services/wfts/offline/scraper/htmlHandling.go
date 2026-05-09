@@ -23,15 +23,7 @@ import (
 	"golang.org/x/text/encoding"
 )
 
-type linkToken struct {
-	Link 		*url.URL
-	Priority 	float64
-	Depth 		int
-	// Ancore		string
-	SameDomain 	bool
-}
-
-func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *url.URL, norm string, gd int) ([]*linkToken, error) {
+func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *url.URL, norm string, gd int) ([]*model.LinkToken, error) {
 	ws.mu.Lock()
 	rl, ok := ws.rlCache.Get(cur.Hostname()).(*rateLimiter)
 	if !ok || rl == nil {
@@ -71,13 +63,13 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 	return links, ws.HandleDocumentWords(ctx, document, features, pr, passages)
 }
 
-func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, features *model.CrawlFeatures, currentDeep int) (links []*linkToken, pasages []model.Passage) {
+func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, features *model.CrawlFeatures, currentDeep int) (links []*model.LinkToken, pasages []model.Passage) {
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
 	var headerType byte
 	var garbageTagCounter int
 	// var isAncore bool
-	links = make([]*linkToken, 0, 64)
-	visit := make([]*linkToken, 0, 16)
+	links = make([]*model.LinkToken, 0, 64)
+	visit := make([]*model.LinkToken, 0, 16)
 	curDomDepth := 0
 
 	rules, ok := ws.rulesCache.Get(baseURL.Hostname()).(*parser.RobotsTxt)
@@ -188,14 +180,15 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 							// isAncore = true
 							same := isSameOrigin(uri, baseURL)
 							if depth, vis := ws.visited.Load(normalized); vis {
-								if depth.(int) > currentDeep {
+								if depth.(int) >= currentDeep {
 									features.UrlCount++
-									visit = append(visit, &linkToken{Link: uri, SameDomain: same})
+									visit = append(visit, &model.LinkToken{Link: uri, SameDomain: same})
+									ws.visited.Store(normalized, currentDeep + 1)
 								}
 								break
 							}
 							features.UrlCount++
-							links = append(links, &linkToken{Link: uri, SameDomain: same})
+							links = append(links, &model.LinkToken{Link: uri, SameDomain: same})
 						}
 						break
 					}

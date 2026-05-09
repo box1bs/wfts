@@ -44,7 +44,7 @@ func run(ctx context.Context) error {
 		Level: slog.LevelDebug,
 	})))
 	valued := context.WithValue(ctx, model.DefLogKey, log)
-	factory, err := app.Init(valued, backupWG, cfg, 10)
+	factory, err := app.Init(valued, backupWG, cfg, 25)
 	if err != nil {
 		return err
 	}

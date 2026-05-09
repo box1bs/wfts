@@ -3,5 +3,5 @@ internal/assets/
 LICENSE
 README.md
 .gitignore
-.scratches
 .github/
+test.http

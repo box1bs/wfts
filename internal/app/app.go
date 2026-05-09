@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 	"wfts/configs"
@@ -29,7 +31,7 @@ type Factory struct {
 const (
 	queueIsFull = "queue is full"
 	isNotExist = "scraper is not running"
-	isExist = "scraper not running"
+	isExist = "scraper is running"
 	maxUrls = 50
 )
 
@@ -38,6 +40,7 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	repos, err := repository.NewIndexRepository(outerCtx, wg, config.IndexPath, config.WorkersCount, outerCtx.Value(model.DefLogKey).(*model.Logger), func(i int) repository.Cacher {
 		return lru.NewLRUCache(i)
 	})
+	debug.SetMemoryLimit(600 << 20)
 	if err != nil {
 		return nil, err
 	}
@@ -88,9 +91,13 @@ func (f *Factory) StartCrawling(outerCtx context.Context, config *configs.Config
 	if f.isRunning() {
 		return errors.New(isExist)
 	}
+	var err error
 	f.startPoint = time.Now()
 	f.innerCtx, f.controller = context.WithCancel(outerCtx)
-	f.scraper = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.MaxDepth, config.OnlySameDomain), f.indexer, f.innerCtx)
+	f.scraper, err = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.OnlySameDomain), f.indexer, f.innerCtx)
+	if err != nil {
+		return err
+	}
 	f.backupWG.Go(func() {
 		f.scraper.Run(f.scraper.PrepareChan(f.complCh))
 	})
@@ -102,9 +109,16 @@ func (f *Factory) GetCurrentState() (*model.CrawlState, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
 	return &model.CrawlState{
 		LastStart: f.startPoint.Format("15:04:05 01-02-2006"),
 		Uptime: f.getUptimeTime().String(),
+		Allocated: mem.Alloc >> 20,
+		MemFromOS: mem.Sys >> 20,
+		HeapIdle: mem.HeapIdle >> 20,
+		HeapInUse: mem.HeapInuse >> 20,
 		DocsInIndex: docs,
 		IsRunning: f.isRunning(),
 	}, nil
@@ -137,6 +151,8 @@ func (f *Factory) StopCrawling(outerCtx context.Context) error {
 
 	log := outerCtx.Value(model.DefLogKey).(*model.Logger)
 	f.controller()
+	f.scraper = nil
+	f.innerCtx = nil
 	log.Infof("scraper stopping...")
 	return nil
 }

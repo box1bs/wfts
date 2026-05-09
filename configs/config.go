@@ -11,7 +11,6 @@ type ConfigData struct {
 	BackupPath				string		`json:"backup_path" validate:"required"`
 	IndexPath     			string   	`json:"index_path" validate:"required"`
 	WorkersCount   			int      	`json:"worker_count" validate:"min=50,max=2000"`
-	MaxDepth       			int      	`json:"max_depth_crawl" validate:"min=1,max=10"`
 	MaxTypo	  				int      	`json:"max_typo" validate:"min=1,max=4"`
 	OnlySameDomain 			bool     	`json:"only_same_domain"`
 }

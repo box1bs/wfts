@@ -22,7 +22,7 @@ const (
 	sitemap = "sitemap"
 )
 
-func (ws *WebScraper) fetchPageRulesAndOffers(ctx context.Context, cur *url.URL) ([]*linkToken, *parser.RobotsTxt, error) {
+func (ws *WebScraper) fetchPageRulesAndOffers(ctx context.Context, cur *url.URL) ([]*model.LinkToken, *parser.RobotsTxt, error) {
 	robotsTXT := &parser.RobotsTxt{}
 	if r, err := parser.FetchRobotsTxt(ctx, cur.String(), ws.client); r != "" && err == nil {
 		*robotsTXT = *parser.ParseRobotsTxt(r)
@@ -114,8 +114,8 @@ func getSitemapURLs(URL string, cli *http.Client) ([]string, error) {
 	return decodeSitemap(bytes.NewReader(bytes.TrimPrefix(body, []byte("\xef\xbb\xbf"))))
 }
 
-func (ws *WebScraper) prepareSitemapLinks(ctx context.Context, current *url.URL) ([]*linkToken, error) {
-	links := make([]*linkToken, 0)
+func (ws *WebScraper) prepareSitemapLinks(ctx context.Context, current *url.URL) ([]*model.LinkToken, error) {
+	links := make([]*model.LinkToken, 0)
 	var urls []string
 	var err error
 	log := ctx.Value(model.DefLogKey).(*model.Logger)
@@ -133,7 +133,7 @@ func (ws *WebScraper) prepareSitemapLinks(ctx context.Context, current *url.URL)
 			if !same && ws.cfg.OnlySameDomain {
 				continue
 			}
-			links = append(links, &linkToken{Link: parsed, SameDomain: same})
+			links = append(links, &model.LinkToken{Link: parsed, SameDomain: same})
 		}
 	}
 	if err == nil {

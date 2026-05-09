@@ -8,25 +8,25 @@ import (
 func TestMinMaxHeap(t *testing.T) {
 	tests := []struct {
 		name 		string
-		inserts 	[]*model.CrawlNode
+		inserts 	[]*model.LinkToken
 		ops 		[]bool
 		expected 	[]int
 	} {
 		{
 			name: "base max test",
-			inserts: []*model.CrawlNode{{Priority: 6}, {Priority: 8}, {Priority: 16}, {Priority: 1}},
+			inserts: []*model.LinkToken{{Priority: 6}, {Priority: 8}, {Priority: 16}, {Priority: 1}},
 			ops: []bool{true, true, true, true},
 			expected: []int{0, 1, 2, 2},
 		},
 		{
 			name: "base min test",
-			inserts: []*model.CrawlNode{{Priority: 6}, {Priority: 2}, {Priority: 16}, {Priority: 1}},
+			inserts: []*model.LinkToken{{Priority: 6}, {Priority: 2}, {Priority: 16}, {Priority: 1}},
 			ops: []bool{false, false, false, false},
 			expected: []int{0, 1, 1, 3},
 		},
 		{
 			name: "min max test",
-			inserts: []*model.CrawlNode{{Priority: 1e-15}, {Priority: 1e-16}, {Priority: 1e-18}, {Priority: 1}},
+			inserts: []*model.LinkToken{{Priority: 1e-15}, {Priority: 1e-16}, {Priority: 1e-18}, {Priority: 1}},
 			ops: []bool{true, false, true, false},
 			expected: []int{0, 1, 0, 2},
 		},

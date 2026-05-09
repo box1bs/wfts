@@ -1,39 +1,32 @@
-# Проект является асинхронным поисковым роботом html страниц на англ. языке, с интегрированным поисковиком и исправлением опечаток.
+# The project is an asynchronous HTML page crawler for English-language content, with an integrated search engine and spell-cheching.
 
-## Демо
+## Demo
 [![Video vs-code-demo](https://private-user-images.githubusercontent.com/190737632/584275984-7e03eaa9-8e8f-405a-85f7-fdacf785eca8.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzczMDE0NzcsIm5iZiI6MTc3NzMwMTE3NywicGF0aCI6Ii8xOTA3Mzc2MzIvNTg0Mjc1OTg0LTdlMDNlYWE5LThlOGYtNDA1YS04NWY3LWZkYWNmNzg1ZWNhOC5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwNDI3JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDQyN1QxNDQ2MTdaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1iOWQ2MmI5OWU0NGIyYWVlMzQ1MDcyYjZhZjAxYTRhOWIwMzQ4NThkNzJjYmU4NjMzYjY3NWUxMGNkY2UzYTE5JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.-N-DXTWgA2kgmLDN4O9fQEeIXkncWyR2qR8I5kn5na0)](https://github.com/user-attachments/assets/7866524a-54cf-4d7d-b6a0-b6b869bee8e9)
 [![Video cli-demo](https://private-user-images.githubusercontent.com/190737632/584278203-3cd94758-701c-4e51-a17d-60849f677dbf.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzczMDE2OTMsIm5iZiI6MTc3NzMwMTM5MywicGF0aCI6Ii8xOTA3Mzc2MzIvNTg0Mjc4MjAzLTNjZDk0NzU4LTcwMWMtNGU1MS1hMTdkLTYwODQ5ZjY3N2RiZi5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwNDI3JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDQyN1QxNDQ5NTNaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT0zYjZlZTQ2OTNlYTQ0NTE5YjJlNWFkNzM5NDdiMjk0OGE1MWM3NTkwMjMwNzE1OGNiZjBhZTQxNTU5NGIzMWVlJlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.Tmh7zmblMPTCOzbwjpx1owyjrKmEmlvP-BvL5TNsyU8)](https://github.com/user-attachments/assets/57b49a4b-8cb2-4be2-896a-8b9b5669e5ad)
 
-## Описание
-Проект был создан для стабильной, многопоточной индексации небольшого объема веб страниц, на английском языке(из-за относительной простоты лингвистики этого языка), с реализацией всего, возможного функционала с помощью build-in инструментов языка golang, для этих целей были реализованы:
+## Description
+The project was created for stable, multithreaded indexing of a small volume of web pages in English (due to the relative simplicity of the language's linguistics), implementing all possible functionality using Go's built-in tools.
 
-### Поисковой робот
-В части обработки html была использована одна из трех внешних библиотек использованных в проекте, для обработки кодировок и извлечения html контента токенизатором, извлечение sitemap и robots.txt правил, переобработка уже посещенных страниц с помощью lru кэша/badger DB(вторая внешняя библиотека), для сохранения нужной для прохождения далее информацией, была придумана наивная(потому что мы считаем что качество ссылок, на которые ссылается обрабатываемая страница, зависят от ее качества) формула для подсчета приоритета задач для планировщика в поисковом роботе, а так же реализована min max куча для буффера задач в планировщике.
+## Crawler
+I implemented encoding handling and HTML content extraction via a tokenizer, sitemap.xml and robots.txt rule extraction, re-processing of already-visited pages using an LRU cache / BadgerDB. To preserve the information needed to continue crawling, I devised a naive formula (naive because we assume the quality of links on a given page depends on that page's own quality) for calculating task priority in the crawler's scheduler, and also implemented a min-max heap for the task buffer in the scheduler, plus an on-disk stack for persisting tasks between sessions and guarding against context-window staleness/rot.
 
-#### Индексер
-Я хотел бы рассказать о нем как о библиотеке скорее, чем как об отдельном компоненте, поскольку в текущей реализации его части импортируются(неявно) обоими главными пакетами. Главная задача индексера в том, чтобы предобработать текст перед сохранением(инвертированный индекс), педобработать поисковую строку перем фетчингом документов в поиске и замены слов, которые мы считаем ошибочными, с учетом контекста(словестные биграммы), контроль схожих(шинглы и min hash) документов по ряду из n схожих шинглов, а так стандартизация(стемминг алгоритм Портера) и токенизация слов, что является функциями дочерних пакетов индексера.
+## Indexer
+I would describe it more as a library than a standalone component, since in the current implementation its parts are imported (implicitly) by both main packages. The indexer's primary job is to preprocess text before storing it in the inverted index, preprocess the search query before fetching documents, replace words considered erroneous with context awareness (word bigrams), control for near-duplicate documents (shingling and MinHash) across a run of n similar shingles, and perform standardization (Porter stemming algorithm) and word tokenization, the latter being functions of the indexer's child packages.
 
-#### Хранилище
-В целом это тоже скорее либа, я реализовал сохранение документов по хэшу нормализованного url, обратный индекс, с учетом, как числа слов в документе, так и их позиций, как токенов, постепенную индексацию n-грам и шинглов, а так же salt массивом для непрерывной работы min hash алгоритма прямым с попмощью прямого бинарного чтения и записи.
+## Index
+I implemented an inverted index that tracks both word counts and positions within documents. I also implemented shingling (MinHash) for checking the similarity of a crawled document against others in shards sharing similar hash segments, trigram indexing for spell correction using a file buffer to distribute load across files, a cache-like store of already-processed pages with their extracted links (for reprocessing when needed), and word bigrams for a full implementation of the noisy channel model.
 
-### Поиск
-В поиске, на мой взгляд, важную роль играют как алгоритмические метрики для отбора кандидатов, по типу term frequency * inverted document frequency, bm25, и любые метрики, которые можно рассчитать на основе индекса, то есть, для примера, term proximity под которой подразумевается минимальный путь между словами запроса в документе(важный момент, от первого слова), так и семантический(или векторный) поиск, который основывается на смысловых эмбеддингах полученных с помощью различных языковых трансформеров, по типу семейства Bert моделей, а так же модели/ей ранжирования поверх этого, с учетом уже новых метрик, для ранжирования, или реранжирования результатов, но к сожелению эту часть пришлось отбросить, из-за невозможности обучить качественную модель, без метрик ориентированных на текущий индекс(tf idf | bm25) и невозможности использования можной Bert модели, из-за жедания сохранить легковесность и скорость индексации и поиска.
+## Search
+In search, I believe algorithmic metrics for candidate selection play an important role, things like TF-IDF, BM25, and any metrics computable directly from the index, such as term proximity (meaning the minimum path between query terms within a document), as does semantic (vector) search based on meaning embeddings produced by various language transformers like the BERT model family, along with a ranking model on top of all that. Unfortunately, this part had to be dropped: training a quality model without metrics grounded in the current index (TF-IDF / BM25) was not feasible, and using a heavy BERT model was out of the question since I want to keep the search lightweight and undemanding on memory and CPU, let alone GPU, and I don't want to slow down indexing or search latency.
 
-## Запуск
-##### cli
-```Для Linux|MacOs
-make index
+## Running
+### Docker
+```bash
+mkdir .data
+make docker-run
 ```
-##### tui
-```Для Linux|MacOs
-make index-gui
-```
-
-##### cli
-```Для Windows
-go run ./cmd/app/main.go
-```
-##### tui
-```Для Windows
-go run ./cmd/app/main.go --gui
+### Host
+```bash
+mkdir .data
+make run
 ```
