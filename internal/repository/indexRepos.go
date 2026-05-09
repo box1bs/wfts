@@ -22,7 +22,6 @@ import (
 type IndexRepository struct {
 	DB 				*badger.DB
 	log 			*model.Logger
-	wg 				*sync.WaitGroup
 	mu 				*sync.Mutex
 	ni				*ngChunkIndex
 	si				*shingleIndex
@@ -36,18 +35,36 @@ type Cacher interface {
 }
 
 func NewIndexRepository(ctx context.Context, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
-	db, err := badger.Open(badger.DefaultOptions(path + "/index").WithLoggingLevel(badger.INFO))
+	opts := badger.DefaultOptions(path + "/index")
+	opts.BlockCacheSize = 32 << 20 // 32 MB
+	opts.IndexCacheSize = 16 << 20 // 16 MB
+	opts.ValueLogFileSize = 64 << 20 // 64 MB
+	opts.NumCompactors = 2
+
+	opts.MemTableSize = 16 << 20
+	opts.NumMemtables = 3
+	
+	opts.NumLevelZeroTables = 2
+	opts.NumLevelZeroTablesStall = 5
+	db, err := badger.Open(opts.WithLoggingLevel(badger.INFO))
 	if err != nil {
 		return nil, err
 	}
-	db.CacheMaxCost(badger.BlockCache, 128 << 20)
+	done := [512]chan struct{}{}
+	writes := [512]chan [1088]byte{}
+	for i := range 512 {
+		writes[i] = make(chan [1088]byte, workersCount)
+		done[i] = make(chan struct{})
+	}
 	ir := &IndexRepository{
 		DB: db,
 		log: log,
-		wg: new(sync.WaitGroup),
 		mu: new(sync.Mutex),
-		ni: NewWordIndex(58, uint32(workersCount)),
-		si: &shingleIndex{},
+		ni: NewWordIndex(uint32(workersCount)),
+		si: &shingleIndex{
+			writes: writes,
+			done: done,
+		},
 		path: path,
 		ctx: ctx,
 	}
@@ -57,22 +74,25 @@ func NewIndexRepository(ctx context.Context, path string, workersCount int, log 
 	if err := os.MkdirAll(filepath.Join(path, "/shingles"), 0755); err != nil {
 		return nil, err
 	}
-	if err := ir.ni.loadBloom(path); err != nil {
-		return nil, err
-	}
 	c, err := ir.LoadIndexC()
 	if err != nil {
 		return nil, err
 	}
+
 	go func() {
 		<-ctx.Done()
-		ir.ni.saveBloom(ir.path)
-		ir.UpdateIndexC(c)
-	}()	
+		ir.si.stop()
+		ir.UpdateIndexC(atomic.LoadUint32(&c))
+	}()
 
 	for i := range shardSize {
 		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
 	}
+
+	for i := range 512 {
+		go ir.shingleWorker(i)
+	}
+
 	return ir, nil
 }
 
@@ -251,26 +271,27 @@ func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys
 			return
 		default:
 		}
-		var idx uint32
+		seq := &sequence{}
 		if val := cacheSys.Get(entry.word); val == nil {
 			key := fmt.Appendf(nil, wordKey, entry.word)
 			if err := ir.DB.Update(func(txn *badger.Txn) error {
 				it, err := txn.Get(key)
 				if err == nil {
 					it.Value(func(val []byte) error {
-						idx = binary.LittleEndian.Uint32(val)
+						seq.id = binary.LittleEndian.Uint32(val)
+						seq.loaded = true
 						return nil
 					})
 					return nil
 				}
 
 				data := [4]byte{}
-				idx = atomic.AddUint32(startPos, 1)
-				binary.LittleEndian.PutUint32(data[:], idx)
+				seq.id = atomic.AddUint32(startPos, 1)
+				binary.LittleEndian.PutUint32(data[:], seq.id)
 				if err := txn.Set(key, data[:]); err != nil {
 					return err
 				}
-				if err := txn.Set(fmt.Appendf(nil, seqKey, idx), []byte(entry.word)); err != nil {
+				if err := txn.Set(fmt.Appendf(nil, seqKey, seq.id), []byte(entry.word)); err != nil {
 					return err
 				}
 				return nil
@@ -278,11 +299,12 @@ func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys
 				ir.log.Errorf("allocation failed: %v", err)
 				return
 			}
-			cacheSys.Put(entry.word, idx)
+			cacheSys.Put(entry.word, seq)
 		} else {
-			idx = val.(uint32)
+			*seq = *val.(*sequence)
+			seq.loaded = true
 		}
-		entry.seqC <- idx
+		entry.seqC <- seq
 	}
 }
 
