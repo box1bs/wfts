@@ -31,7 +31,7 @@ mkdir .data
 make run
 ```
 
-## Two-day benchmark
+## Two-day benchmark(MS Azure VM B1ms)
 * documents idexed: 48963
 * memory availability metrics:
 ![first day metrics](./internal/assets/may10m.png)
