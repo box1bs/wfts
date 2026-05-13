@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"wfts/internal/model"
 
 	"github.com/dgraph-io/badger/v3"
+	"github.com/dgraph-io/badger/v3/options"
 )
 
 type IndexRepository struct {
@@ -36,8 +36,7 @@ type Cacher interface {
 
 func NewIndexRepository(ctx context.Context, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
 	opts := badger.DefaultOptions(path + "/index")
-	opts.BlockCacheSize = 32 << 20 // 32 MB
-	opts.IndexCacheSize = 16 << 20 // 16 MB
+	opts.Compression = options.None
 	opts.ValueLogFileSize = 64 << 20 // 64 MB
 	opts.NumCompactors = 2
 
@@ -159,10 +158,7 @@ func (ir *IndexRepository) IndexDocumentWords(docID [32]byte, sequence map[strin
 					Count:     entry.freq,
 					Positions: positions,
 				}
-				val, err := json.Marshal(wcp)
-				if err != nil {
-					return err
-				}
+				val := marshalWCP(wcp)
 				if len(val) > 1024 * 1024 { // нужен ли нам текстовый токен более 1 мб? я думаю нет, я правда не сильно верю что это условие вообще хоть раз отработает
 					continue
 				}
@@ -201,7 +197,7 @@ func (ir *IndexRepository) GetDocumentsByWord(word string) (map[[32]byte]model.W
 				return err
 			}
 			positions := model.WordCountAndPositions{}
-			if err := json.Unmarshal(val, &positions); err != nil {
+			if positions, err = unmarshalWCP(val); err != nil {
 				return err
 			}
 
@@ -210,6 +206,40 @@ func (ir *IndexRepository) GetDocumentsByWord(word string) (map[[32]byte]model.W
 		
 		return nil
 	})
+}
+
+func marshalWCP(wcp model.WordCountAndPositions) []byte {
+    size := 2 + len(wcp.Positions)*8
+    buf := make([]byte, size)
+    binary.LittleEndian.PutUint16(buf[0:], uint16(wcp.Count))
+    for i, p := range wcp.Positions {
+        binary.LittleEndian.PutUint32(buf[2+i*4:], encPosEntry(p.Type, p.I))
+    }
+    return buf
+}
+
+func unmarshalWCP(data []byte) (model.WordCountAndPositions, error) {
+    if len(data) < 2 {
+        return model.WordCountAndPositions{}, fmt.Errorf("data is unexpectable short")
+    }
+    count := binary.LittleEndian.Uint16(data[0:])
+    positions := make([]model.Position, max(count, 500))
+    for i := range positions {
+		t, p := decPosEntry(binary.LittleEndian.Uint32(data[2+i*4:]))
+        positions[i] = model.Position{
+            Type: t,
+			I: p,
+        }
+    }
+    return model.WordCountAndPositions{Count: int(count), Positions: positions}, nil
+}
+
+func encPosEntry(a byte, p int) uint32 {
+	return uint32((p << 1) | int(a))
+}
+
+func decPosEntry(d uint32) (byte, int) {
+	return byte(d & 1), int(d >> 1)
 }
 
 const biK = "big:%d:%d"
