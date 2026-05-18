@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"slices"
-
 	"wfts/internal/model"
-	"github.com/dgraph-io/badger/v3"
+
+	"github.com/cockroachdb/pebble"
 )
 
 const (
@@ -57,67 +56,41 @@ func (ir *IndexRepository) SaveDocument(doc *model.Document) error {
 	}
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
-	return ir.DB.Update(func(txn *badger.Txn) error {
-		return txn.Set(fmt.Appendf(nil, DocumentKeyPrefix, doc.Id[:]), docBytes)
-	})
+	return ir.DB.Set(fmt.Appendf(nil, DocumentKeyPrefix, doc.Id[:]), docBytes, pebble.NoSync)
 }
 
 func (ir *IndexRepository) GetDocumentByID(docID [32]byte) (*model.Document, error) {
-	var docBytes []byte
-	err := ir.DB.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(fmt.Appendf(nil, DocumentKeyPrefix, docID[:]))
-		if err != nil {
-			return err
-		}
-
-		return item.Value(func(val []byte) error {
-			docBytes = slices.Clone(val)
-			return nil
-		})
-	})
-
+	val, closer, err := ir.DB.Get(fmt.Appendf(nil, DocumentKeyPrefix, docID[:]))
 	if err != nil {
 		return nil, err
 	}
-
+	docBytes := make([]byte, len(val))
+	copy(docBytes, val)
+	closer.Close()
 	return ir.bytesToDocument(docBytes)
 }
 
 func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
-	pref := []byte("doc:")
+	prefix := []byte("doc:")
 	documents := make([]*model.Document, 0, 512)
-	err := ir.DB.View(func(txn *badger.Txn) error {
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchSize = 10
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Seek([]byte(pref)); it.ValidForPrefix([]byte(pref)); it.Next() {
-			item := it.Item()
-			var docBytes []byte
-
-			err := item.Value(func(val []byte) error {
-				docBytes = slices.Clone(val)
-				return nil
-			})
-
-			if err != nil {
-				return err
-			}
-
-			doc, err := ir.bytesToDocument(docBytes)
-			if err != nil {
-				return err
-			}
-
-			documents = append(documents, doc)
-		}
-
-		return nil
+	it, err := ir.DB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+    	UpperBound: prefixUpperBound(prefix),
 	})
-
 	if err != nil {
 		return nil, err
+	}
+	defer it.Close()
+
+	for it.First(); it.Valid(); it.Next() {
+		docBytes := make([]byte, len(it.Value()))
+		copy(docBytes, it.Value())
+
+		doc, err := ir.bytesToDocument(docBytes)
+		if err != nil {
+			return nil, err
+		}
+		documents = append(documents, doc)
 	}
 
 	return documents, nil
@@ -125,24 +98,18 @@ func (ir *IndexRepository) GetAllDocuments() ([]*model.Document, error) {
 
 func (ir *IndexRepository) GetDocumentsCount() (int, error) {
 	var count int
-	err := ir.DB.View(func(txn *badger.Txn) error {
-		docPrefix := []byte("doc:")
-
-		opts := badger.DefaultIteratorOptions
-		opts.PrefetchValues = false
-		it := txn.NewIterator(opts)
-		defer it.Close()
-
-		for it.Seek(docPrefix); it.ValidForPrefix(docPrefix); it.Next() {
-			count++
-		}
-
-		return nil
+	docPrefix := []byte("doc:")
+	it, err := ir.DB.NewIter(&pebble.IterOptions{
+		LowerBound: docPrefix,
+    	UpperBound: prefixUpperBound(docPrefix),
+		KeyTypes:   pebble.IterKeyTypePointsOnly,
 	})
-
 	if err != nil {
 		return 0, err
 	}
-
+	defer it.Close()
+	for it.First(); it.Valid(); it.Next() {
+		count++
+	}
 	return count, nil
 }

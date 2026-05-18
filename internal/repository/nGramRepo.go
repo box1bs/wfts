@@ -9,7 +9,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/cockroachdb/pebble"
 )
 
 type srequest struct {
@@ -143,44 +143,32 @@ func (ir *IndexRepository) GetWordsByTGrams(word string) ([]string, error) {
 
 func (ir *IndexRepository) getWordsFromSeq(nums ...uint32) ([]string, error) {
 	var words []string
-	return words, ir.DB.View(func(txn *badger.Txn) error {
-		for _, id := range nums {
-			if it, err := txn.Get(fmt.Appendf(nil, seqKey, id)); err != nil && err != badger.ErrKeyNotFound {
-				return err
-			} else if err == badger.ErrKeyNotFound {
-				return fmt.Errorf("Storage internal error, invalid id: %d", id)
-			} else {
-				data, err := it.ValueCopy(nil)
-				if err != nil {
-					return err
-				}
-				words = append(words, string(data))
-			}
+	for _, id := range nums {
+		if val, closer, err := ir.DB.Get(fmt.Appendf(nil, seqKey, id)); err != nil && err != pebble.ErrNotFound {
+			return nil, err
+		} else if err != nil {
+			return nil, fmt.Errorf("Storage internal error, invalid id: %d", id)
+		} else {
+			words = append(words, string(val))
+			closer.Close()
 		}
-		return nil
-	})
+	}
+	return words, nil
 }
 
 func (ir *IndexRepository) LoadIndexC() (uint32, error) {
 	var id uint32
-	return id, ir.DB.View(func(txn *badger.Txn) error {
-		if it, err := txn.Get([]byte(inck)); err == nil {
-			val, err := it.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-			id =  binary.LittleEndian.Uint32(val)
-		} else if err != badger.ErrKeyNotFound {
-			return err
-		}
-		return nil
-	})
+	if val, closer, err := ir.DB.Get([]byte(inck)); err == nil {
+		id =  binary.LittleEndian.Uint32(val)
+		closer.Close()
+	} else if err != pebble.ErrNotFound {
+		return 0, err
+	}
+	return id, nil
 }
 
 func (ir *IndexRepository) UpdateIndexC(id uint32) error {
-	return ir.DB.Update(func(txn *badger.Txn) error {
-		return txn.Set([]byte(inck), binary.LittleEndian.AppendUint32(nil, id))
-	})
+	return ir.DB.Set([]byte(inck), binary.LittleEndian.AppendUint32(nil, id), pebble.NoSync)
 }
 
 // assuming that word contains only lower case letters
