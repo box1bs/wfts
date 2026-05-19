@@ -4,7 +4,7 @@ CONFIG_PATH=./configs/default.json
 LOCAL_BIN_PATH=.data
 IMAGE_NAME=wfts
 HOST_PORT=80
-MEMORY_LIM=1800m
+MEMORY_LIM=1600m
 
 build: test
 	go build -o ./.bin/${BINARY_NAME} ./cmd/app/main.go
