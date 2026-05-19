@@ -22,13 +22,22 @@ const (
 	sitemap = "sitemap"
 )
 
+func resetUrl(uri *url.URL) string {
+	var sb strings.Builder
+	sb.WriteString(uri.Scheme)
+	sb.WriteString("://")
+	sb.WriteString(uri.Hostname())
+	sb.WriteByte('/')
+	return sb.String()
+}
+
 func (ws *WebScraper) fetchPageRulesAndOffers(ctx context.Context, cur *url.URL) ([]*model.LinkToken, *parser.RobotsTxt, error) {
 	robotsTXT := &parser.RobotsTxt{}
-	if r, err := parser.FetchRobotsTxt(ctx, cur.String(), ws.client); r != "" && err == nil {
+	if r, err := parser.FetchRobotsTxt(ctx, resetUrl(cur), ws.client); r != "" && err == nil {
 		*robotsTXT = *parser.ParseRobotsTxt(r)
 		ws.mu.Lock()
 		if lim, ok := ws.rlCache.Get(cur.Hostname()).(*rateLimiter); ok && (lim == nil || lim.R == DefaultDelay) && robotsTXT.Rules["*"].Delay > 0 {
-			ws.rlCache.Put(cur.Host, NewRateLimiter(robotsTXT.Rules["*"].Delay))
+			ws.rlCache.Put(cur.Hostname(), NewRateLimiter(robotsTXT.Rules["*"].Delay))
 		}
 		ws.mu.Unlock()
 	} else {
@@ -40,7 +49,7 @@ func (ws *WebScraper) fetchPageRulesAndOffers(ctx context.Context, cur *url.URL)
 }
 
 func (ws *WebScraper) haveSitemap(url *url.URL) ([]string, error) {
-	sitemapURL := url.String()
+	sitemapURL := resetUrl(url)
 	if !strings.Contains(sitemapURL, sitemap) {
 		sitemapURL = strings.TrimSuffix(url.String(), "/")
 		sitemapURL = sitemapURL + "/" + sitemap + ".xml"

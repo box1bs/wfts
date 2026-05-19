@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"runtime"
 	"runtime/debug"
@@ -42,8 +40,7 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	repos, err := repository.NewIndexRepository(outerCtx, wg, config.IndexPath, config.WorkersCount, outerCtx.Value(model.DefLogKey).(*model.Logger), func(i int) repository.Cacher {
 		return lru.NewLRUCache(i)
 	})
-	debug.SetMemoryLimit(600 << 20)
-	debug.SetGCPercent(50)
+	debug.SetMemoryLimit(800 << 20)
 	if err != nil {
 		return nil, err
 	}
@@ -56,9 +53,6 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	go func() {
 		<-outerCtx.Done()
 		close(f.complCh)
-	}()
-	go func() {
-		http.ListenAndServe("0.0.0.0:6060", nil)
 	}()
 	return f, nil
 }

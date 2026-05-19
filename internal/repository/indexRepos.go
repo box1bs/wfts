@@ -286,8 +286,6 @@ func (ir *IndexRepository) UpdateBiFreq(biS map[[2]uint64]int) error {
 }
 
 func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
 	freq := 0
 	val, closer, err := ir.DB.Get(fmt.Appendf(nil, biK, l, r))
 	if err != nil {
