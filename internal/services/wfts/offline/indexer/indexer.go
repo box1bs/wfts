@@ -39,7 +39,7 @@ type repository interface {
 	GetDocumentsCount() (int, error)
 }
 
-type indexer struct {
+type Indexer struct {
 	repository
 	model 		lr.RegressionModel
 	scaler 		lr.Scaler
@@ -49,7 +49,7 @@ type indexer struct {
 	mu 			*sync.RWMutex
 }
 
-func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
+func NewIndexer(repo repository, config *configs.ConfigData) (*Indexer, error) {
 	model := lr.LogisticRegressor(0.4)
 	if err := model.LoadFromFile("./model"); err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
 	if err := scaler.LoadFromFile("./scaler"); err != nil {
 		return nil, err
 	}
-	idx := &indexer{
+	idx := &Indexer{
 		model: 		model,
 		scaler: 	scaler,
 		stemmer:   	textHandling.NewEnglishStemmer(),
@@ -81,11 +81,11 @@ func NewIndexer(repo repository, config *configs.ConfigData) (*indexer, error) {
 	return idx, nil
 }
 
-func (idx *indexer) SaveHashArrays() error {
+func (idx *Indexer) SaveHashArrays() error {
 	return idx.SaveSaltArrays(idx.minHash.a, idx.minHash.b)
 }
 
-func (idx *indexer) GetAVGLen() (float64, error) {
+func (idx *Indexer) GetAVGLen() (float64, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 

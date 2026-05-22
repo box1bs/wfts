@@ -11,7 +11,7 @@ import (
 	lr "github.com/box1bs/logistic_regression_go"
 )
 
-func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, externalFeatures *model.CrawlFeatures, priority *float64, passages []model.Passage) error {
+func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document, externalFeatures *model.CrawlFeatures, priority *float64, passages []model.Passage) error {
 	stem := make(map[string]int, 512)
 	pos := make(map[string][]model.Position, 512)
 	
@@ -52,7 +52,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		skipIndexAdding = true
 	}
 
-	sim := 1.0
+	sim := 0.0
 	if l := len(allWordTokens); !skipIndexAdding && l > 4 {
 		sign := idx.minHash.CreateSignature(allWordTokens[:min(5000, l)])
 		conds, err := idx.repository.GetSimilarSigns(sign)
@@ -63,7 +63,7 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 			logger.Debugf("finded %f similar page, with word tokens len: %d", sim, len(allWordTokens))
 			return fmt.Errorf("page already indexed")
 		}
-		if err := idx.repository.IndexDocShingles(sign); err != nil {
+		if err := idx.repository.IndexDocShingles(sign); err != nil && err != context.Canceled {
 			return err
 		}
 	}
@@ -77,28 +77,28 @@ func (idx *indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 		return err
 	}
 	if skipIndexAdding {
-		logger.Debugf("potentially garbage link")
+		logger.Debugf("skipped by model decision")
 		return fmt.Errorf("skipped by model decision")
 	}
 	if err := idx.repository.SaveDocument(doc); err != nil {
 		logger.Errorf("error saving document: %v", err)
 		return err
 	}
-	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil {
-		logger.Errorf("error indexing ngrams: %v", err)
-		return err
-	}
 	if err := idx.repository.IndexDocumentWords(doc.Id, stem, pos); err != nil {
 		logger.Errorf("error indexing document words: %v", err)
 		return err
 	}
+	if err := idx.repository.IndexTriGrams(allWordTokens); err != nil && err != context.Canceled {
+		logger.Errorf("error indexing ngrams: %v", err)
+		return err
+	}
 
-	*priority += math.Log(float64(utokens) + 1) + 1 // (1 + sameDomain) * (log(linksNumber + 1) + log(UniqTokenCount + 1) + 1) / ((parentDepth + 1) * (1 - simRate) * (log(tokenCount + 1) + 1)) * e**(-a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
-	*priority /= ((math.Log(float64(doc.TokenCount) + 1) + 1) * (1 - sim))
+	*priority *= (1 - sim)
+	*priority *= (float64(utokens) / float64(doc.TokenCount)) // (1 + sameDomain) * (log(linksNumber + 1) * (1 - simRate) * (UniqTokenCount / TokenCount) / (log(tokenCount + 1) + 1) * γ * (1 / Depth / Visited penalty) * parent.Priority ** β // наивная метрика приоритизации
 	return nil
 }
 
-func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string, []map[[32]byte]model.WordCountAndPositions, error) {
+func (idx *Indexer) HandleTextQuery(ctx context.Context, text string) ([]string, []map[[32]byte]model.WordCountAndPositions, error) {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
 
@@ -125,7 +125,6 @@ func (idx *indexer) HandleTextQuery(ctx context.Context, text string) ([]string,
 		}
 		if len(documents) == 0 && stemmed[i].Type == textHandling.WORD { // исправляем только слова
 			conds, err := idx.repository.GetWordsByTGrams(words[wordPos])
-			fmt.Printf("word: %s, conds: %v", words[i], conds)
 			if err != nil {
 				return nil, nil, err
 			}

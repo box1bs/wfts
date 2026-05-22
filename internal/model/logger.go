@@ -16,6 +16,10 @@ func NewLogger(log *slog.Logger) *Logger {
 	}
 }
 
+func (l *Logger) AddAttr(attr slog.Attr) *Logger {
+	return &Logger{log: l.log.With(attr)}
+}
+
 type defaultLoggerKey uint8
 const DefLogKey = defaultLoggerKey(0)
 

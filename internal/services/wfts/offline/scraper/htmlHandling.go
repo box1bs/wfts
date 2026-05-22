@@ -23,15 +23,7 @@ import (
 	"golang.org/x/text/encoding"
 )
 
-type linkToken struct {
-	Link 		*url.URL
-	Priority 	float64
-	Depth 		int
-	// Ancore		string
-	SameDomain 	bool
-}
-
-func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *url.URL, norm string, gd int) ([]*linkToken, error) {
+func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *url.URL, norm string, gd int) ([]*model.LinkToken, error) {
 	ws.mu.Lock()
 	rl, ok := ws.rlCache.Get(cur.Hostname()).(*rateLimiter)
 	if !ok || rl == nil {
@@ -45,7 +37,7 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 		return nil, fmt.Errorf(canceled)
 	}
     if err != nil {
-		log.Errorf("url page error: %v", err)
+		log.Errorf("%v", err)
         return nil, err
     }
 	if doc == "" {
@@ -71,13 +63,12 @@ func (ws *WebScraper) fetchHTMLcontent(ctx context.Context, pr *float64, cur *ur
 	return links, ws.HandleDocumentWords(ctx, document, features, pr, passages)
 }
 
-func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, features *model.CrawlFeatures, currentDeep int) (links []*linkToken, pasages []model.Passage) {
+func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, baseURL *url.URL, features *model.CrawlFeatures, currentDeep int) (links []*model.LinkToken, pasages []model.Passage) {
 	tokenizer := html.NewTokenizer(strings.NewReader(htmlContent))
 	var headerType byte
 	var garbageTagCounter int
 	// var isAncore bool
-	links = make([]*linkToken, 0, 64)
-	visit := make([]*linkToken, 0, 16)
+	links = make([]*model.LinkToken, 0, 64)
 	curDomDepth := 0
 
 	rules, ok := ws.rulesCache.Get(baseURL.Hostname()).(*parser.RobotsTxt)
@@ -95,9 +86,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 		if tokenCount % checkContextEvery == 0 {
 			select {
 			case <-ctx.Done():
-				if len(visit) != 0 {
-					links = append(links, visit...)
-				}
 				return
 			default:
 			}
@@ -125,7 +113,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 			switch tagName {
 			case "html":
 				for _, attr := range t.Attr {
-					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {log.Debugf("Not eng html"); return}
+					if attr.Key == "lang" && !strings.Contains(strings.ToLower(attr.Val), "en") {return}
 				}
 
 			case "h1", "h2":
@@ -165,7 +153,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								break
 							}
 							if ext := strings.ToLower(path.Ext(uri.Path)); ext == ".pdf" || ext == ".xml" {
-								log.Infof("pdf or xml link: %s", uri.String())
 								break
 							}
 							if types := uri.Query()["format"]; len(types) > 0 {
@@ -178,26 +165,25 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								}
 
 								if !allowed {
-									log.Infof("potential non-html link: %s", uri.String())
 									break
 								}
 							}
 							if rules != nil {
-								if !rules.IsAllowed(userAgent, uri.Path)  || !rules.IsAllowed("*", uri.Path){
+								if !rules.IsAllowed("*", uri.Path){
 									break
 								}
 							}
 							// isAncore = true
 							same := isSameOrigin(uri, baseURL)
 							if depth, vis := ws.visited.Load(normalized); vis {
-								if depth.(int) > currentDeep {
+								if depth.(int) >= currentDeep {
 									features.UrlCount++
-									visit = append(visit, &linkToken{Link: uri, SameDomain: same})
+									links = append(links, &model.LinkToken{Link: uri, SameDomain: same})
 								}
 								break
 							}
 							features.UrlCount++
-							links = append(links, &linkToken{Link: uri, SameDomain: same})
+							links = append(links, &model.LinkToken{Link: uri, SameDomain: same})
 						}
 						break
 					}
@@ -253,9 +239,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 		}
 	}
 	if curDomDepth > features.DomDepth {features.DomDepth = curDomDepth}
-	if len(visit) != 0 {
-		links = append(links, visit...)
-	}
 	return
 }
 
@@ -280,7 +263,7 @@ func (ws *WebScraper) getHTML(ctx context.Context, URL string, rl *rateLimiter, 
 	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html")
 
-	rl.GetToken(ws.globalCtx) // не должно ложить приложение, но в целом по желанию
+	rl.GetToken(ws.globalCtx)
 	resp, err := ws.client.Do(req)
 	if err != nil {
 		return "", err

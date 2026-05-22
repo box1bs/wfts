@@ -63,12 +63,14 @@ func main() {
 	}
 	defer ir.DB.Close()
 
+	runner := make(chan *model.LinkToken, cfg.WorkersCount * 25)
 	go func() {
 		c := make(chan os.Signal, 1)
 		signal.Notify(c, os.Interrupt)
 		<-c
 		fmt.Println("\nShutting down...")
 		cancel()
+		close(runner)
 		//os.Exit(1)
 	}()
 
@@ -77,8 +79,11 @@ func main() {
 		panic(err)
 	}
 	if !*indexFlag {
-		ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, cfg.BackupPath, out, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
-		if err := ws.Run(); err != nil {
+		ws, err := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, cfg.CachePath, out, cfg.WorkersCount, cfg.OnlySameDomain), i, ctx)
+		if err != nil {
+			panic(err)
+		}
+		if err := ws.Run(runner); err != nil {
 			panic(err)
 		}
 	}
@@ -120,7 +125,8 @@ func Present(docs []*model.Document, docMetrics []*model.DocRanking, metrics *mo
 func initGUI(cfg *configs.ConfigData, indexF bool) {
 	lw := ui.NewLogWriter(1000)
 	log := model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
-		ReplaceAttr: model.Replacer,
+		ReplaceAttr: 	model.Replacer,
+		Level: 			slog.LevelDebug,
 	})))
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -134,6 +140,11 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 	}
 	defer ir.DB.Close()
 
+	runner := make(chan *model.LinkToken, cfg.WorkersCount * 25)
+	go func() {
+		<-ctx.Done()
+		close(runner)
+	}()
 	done := make(chan struct{})
 	i, err := indexer.NewIndexer(ir, cfg)
 	if err != nil {
@@ -142,8 +153,11 @@ func initGUI(cfg *configs.ConfigData, indexF bool) {
 
 	if !indexF {
 		go func() {
-			ws := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, cfg.BackupPath, lw, cfg.WorkersCount, cfg.MaxDepth, cfg.OnlySameDomain), i, ctx)
-			if err := ws.Run(); err != nil {
+			ws, err := scraper.NewScraper(scraper.NewScrapeConfig(cfg.BaseURLs, cfg.CachePath, lw, cfg.WorkersCount, cfg.OnlySameDomain), i, ctx)
+			if err != nil {
+				panic(err)
+			}
+			if err := ws.Run(runner); err != nil {
 				model.NewLogger(slog.New(slog.NewJSONHandler(lw, &slog.HandlerOptions{
 					ReplaceAttr: model.Replacer,
 				}))).Errorf("%v, scraping canceled", err)
