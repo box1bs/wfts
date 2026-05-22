@@ -157,6 +157,35 @@ func TestNormalizeUrl(t *testing.T) {
     }
 }
 
+func TestResettingUrl(t *testing.T) {
+	tests := []struct {
+        name     string
+        input    string
+        expected string
+    } {
+        {
+			name: "general", 
+			input: "https://www.example.com/", 
+			expected: "https://www.example.com/",
+		},
+        {
+			name: "not empty path", 
+			input: "https://hub.docker.com/repositories/korobo4ka", 
+			expected: "https://hub.docker.com/",
+		},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            uri, _ := url.Parse(tt.input)
+            result := resetUrl(uri)
+            if result != tt.expected {
+                t.Errorf("resetUrl(%q) = %q; want %q",
+                    tt.input, result, tt.expected)
+            }
+        })
+    }
+}
+
 func TestDomainDefinition(t *testing.T) {
 	parsedUrl1, _ := url.Parse("https://google.com/")
 	parsedUrl2, _ := url.Parse("https://www.google.com/search?q=thfjngjkyk&sca_esv=492d03d456b59a14&sxsrf=ANbL-n6qW_s1ov2p-JUzb8lBX_hM-2ECbw%3A1768497888610&source=hp&ei=4CJpafXUI5yzi-gP_tXY4Ac&iflsig=AFdpzrgAAAAAaWkw8E8wYLwh1iURDenMKQfHKOYRIK5S&ved=0ahUKEwj1xL2DiI6SAxWc2QIHHf4qFnwQ4dUDCB4&uact=5&oq=thfjngjkyk&gs_lp=Egdnd3Mtd2l6Igp0aGZqbmdqa3lrMgUQABjvBTIIEAAYgAQYogQyCBAAGIAEGKIEMggQABiABBiiBDIFEAAY7wVIkwtQlwJYqgdwAXgAkAECmAHZAaABuQqqAQUwLjkuMbgBA8gBAPgBAZgCCaACngioAgrCAg0QIxiABBgnGIoFGOoCwgIHECMYJxjqAsICChAjGIAEGCcYigXCAgoQLhiABBhDGIoFwgIKEAAYgAQYQxiKBcICBRAAGIAEwgILEC4YgAQY0QMYxwHCAgUQLhiABMICBxAAGIAEGArCAgkQABiABBgKGAvCAgsQABiABBgBGAoYC8ICBxAuGIAEGA3CAgkQABiABBgKGA3CAgYQABgNGB7CAgcQABiABBgNwgILEAAYgAQYkgMYigXCAgoQABiABBjJAxgNmAMR8QWwBqhiWbg58JIHAzEuOKAH6UyyBwMwLji4B40IwgcHMC4zLjMuM8gHLoAIAA&sclient=gws-wiz")

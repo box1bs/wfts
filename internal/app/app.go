@@ -40,7 +40,7 @@ func Init(outerCtx context.Context, wg *sync.WaitGroup, config *configs.ConfigDa
 	repos, err := repository.NewIndexRepository(outerCtx, wg, config.IndexPath, config.WorkersCount, outerCtx.Value(model.DefLogKey).(*model.Logger), func(i int) repository.Cacher {
 		return lru.NewLRUCache(i)
 	})
-	debug.SetMemoryLimit(600 << 20)
+	debug.SetMemoryLimit(800 << 20)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (f *Factory) StartCrawling(outerCtx context.Context, config *configs.Config
 	var err error
 	f.startPoint = time.Now()
 	f.innerCtx, f.controller = context.WithCancel(outerCtx)
-	f.scraper, err = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.BackupPath, os.Stdout, config.WorkersCount, config.OnlySameDomain), f.indexer, f.innerCtx)
+	f.scraper, err = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.CachePath, os.Stdout, config.WorkersCount, config.OnlySameDomain), f.indexer, f.innerCtx)
 	if err != nil {
 		return err
 	}

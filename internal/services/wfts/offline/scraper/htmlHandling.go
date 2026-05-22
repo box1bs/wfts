@@ -69,7 +69,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 	var garbageTagCounter int
 	// var isAncore bool
 	links = make([]*model.LinkToken, 0, 64)
-	visit := make([]*model.LinkToken, 0, 16)
 	curDomDepth := 0
 
 	rules, ok := ws.rulesCache.Get(baseURL.Hostname()).(*parser.RobotsTxt)
@@ -87,9 +86,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 		if tokenCount % checkContextEvery == 0 {
 			select {
 			case <-ctx.Done():
-				if len(visit) != 0 {
-					links = append(links, visit...)
-				}
 				return
 			default:
 			}
@@ -173,7 +169,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 								}
 							}
 							if rules != nil {
-								if !rules.IsAllowed(userAgent, uri.Path)  || !rules.IsAllowed("*", uri.Path){
+								if !rules.IsAllowed("*", uri.Path){
 									break
 								}
 							}
@@ -182,8 +178,7 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 							if depth, vis := ws.visited.Load(normalized); vis {
 								if depth.(int) >= currentDeep {
 									features.UrlCount++
-									visit = append(visit, &model.LinkToken{Link: uri, SameDomain: same})
-									ws.visited.Store(normalized, currentDeep + 1)
+									links = append(links, &model.LinkToken{Link: uri, SameDomain: same})
 								}
 								break
 							}
@@ -244,9 +239,6 @@ func (ws *WebScraper) parseHTMLStream(ctx context.Context, htmlContent string, b
 		}
 	}
 	if curDomDepth > features.DomDepth {features.DomDepth = curDomDepth}
-	if len(visit) != 0 {
-		links = append(links, visit...)
-	}
 	return
 }
 

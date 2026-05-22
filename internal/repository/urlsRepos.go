@@ -3,25 +3,22 @@ package repository
 import (
 	"fmt"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/cockroachdb/pebble"
 )
 
 const urlsKey = "hashKey:%s"
 
 func (ir *IndexRepository) IndexUrlsByHash(hash [32]byte, urlsStruct []byte) error {
-	return ir.DB.Update(func(txn *badger.Txn) error {
-		return txn.Set(fmt.Appendf(nil, urlsKey, hash), urlsStruct)
-	})
+	return ir.DB.Set(fmt.Appendf(nil, urlsKey, hash), urlsStruct, pebble.NoSync)
 }
 
 func (ir *IndexRepository) GetPageUrlsByHash(hash [32]byte) ([]byte, error) {
-	urlsStruct := []byte{}
-	return urlsStruct, ir.DB.View(func(txn *badger.Txn) error {
-		it, err := txn.Get(fmt.Appendf(nil, urlsKey, hash))
-		if err != nil {
-			return err
-		}
-		urlsStruct, err = it.ValueCopy(nil)
-		return err
-	})
+	val, closer, err := ir.DB.Get(fmt.Appendf(nil, urlsKey, hash))
+	if err != nil {
+		return nil, err
+	}
+	urlsStruct := make([]byte, len(val))
+	copy(urlsStruct, val)
+	closer.Close()
+	return urlsStruct, nil
 }

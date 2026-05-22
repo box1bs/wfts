@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -12,15 +11,16 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"wfts/internal/model"
 
-	"github.com/dgraph-io/badger/v3"
+	"github.com/cockroachdb/pebble"
 )
 
 type IndexRepository struct {
-	DB 				*badger.DB
+	DB 				*pebble.DB
 	log 			*model.Logger
 	mu 				*sync.Mutex
 	ni				*ngChunkIndex
@@ -35,18 +35,23 @@ type Cacher interface {
 }
 
 func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path string, workersCount int, log *model.Logger, cacher func(int) Cacher) (*IndexRepository, error) {
-	opts := badger.DefaultOptions(path + "/index")
-	opts.BlockCacheSize = 32 << 20 // 32 MB
-	opts.IndexCacheSize = 16 << 20 // 16 MB
-	opts.ValueLogFileSize = 64 << 20 // 64 MB
-	opts.NumCompactors = 2
+	opts := &pebble.Options{
+		MemTableSize: 64 << 20,
+		MemTableStopWritesThreshold: 2,
 
-	opts.MemTableSize = 16 << 20
-	opts.NumMemtables = 3
-	
-	opts.NumLevelZeroTables = 2
-	opts.NumLevelZeroTablesStall = 5
-	db, err := badger.Open(opts.WithLoggingLevel(badger.INFO))
+		L0CompactionThreshold: 2,
+		L0StopWritesThreshold: 8,
+
+    	MaxConcurrentCompactions: func() int { return 2 },
+
+		Levels: []pebble.LevelOptions{
+			{TargetFileSize: 4 << 20},  // L0
+			{TargetFileSize: 8 << 20},  // L1
+			{TargetFileSize: 16 << 20}, // L2+
+		},
+    	Cache: pebble.NewCache(32 << 20),
+	}
+	db, err := pebble.Open(path + "/index", opts)
 	if err != nil {
 		return nil, err
 	}
@@ -78,13 +83,13 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 	if err != nil {
 		return nil, err
 	}
-
+	t := time.NewTicker(24 * time.Hour)
 	backupWg.Go(func() {
 		<-ctx.Done()
+		t.Stop()
 		ir.si.stop()
 		ir.UpdateIndexC(atomic.LoadUint32(&c))
 	})
-
 	for i := range shardSize {
 		go ir.alloc(&c, ir.ni.shards[i], cacher(workersCount))
 	}
@@ -97,21 +102,21 @@ func NewIndexRepository(ctx context.Context, backupWg *sync.WaitGroup, path stri
 }
 
 func (ir *IndexRepository) LoadVisitedUrls(visitedURLs *sync.Map) error {
-    return ir.DB.View(func(txn *badger.Txn) error {
-        it := txn.NewIterator(badger.DefaultIteratorOptions)
-        defer it.Close()
-        for it.Seek([]byte("visited:")); it.ValidForPrefix([]byte("visited:")); it.Next() {
-            item := it.Item()
-            key := string(item.Key())
-            url := strings.TrimPrefix(key, "visited:")
-			depth, err := item.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-            visitedURLs.Store(url, decCount(depth))
-        }
-        return nil
-    })
+	prefix := []byte("visited:")
+	it, err := ir.DB.NewIter(&pebble.IterOptions{
+		LowerBound: prefix,
+    	UpperBound: prefixUpperBound(prefix),
+	})
+	if err != nil {
+		return err
+	}
+	defer it.Close()
+	for it.First(); it.Valid(); it.Next() {
+		key := string(it.Key())
+		url := strings.TrimPrefix(key, "visited:")
+		visitedURLs.Store(url, decCount(it.Value()))
+	}
+	return nil
 }
 
 func (ir *IndexRepository) SaveVisitedUrls(visitedURLs *sync.Map) error {
@@ -123,9 +128,7 @@ func (ir *IndexRepository) SaveVisitedUrls(visitedURLs *sync.Map) error {
 		return true
 	})
 	for _, u := range urls {
-		if err := ir.DB.Update(func(txn *badger.Txn) error {
-			return txn.Set([]byte("visited:"+u.url), encCount(u.depth))
-		}); err != nil {
+		if err := ir.DB.Set([]byte("visited:"+u.url), encCount(u.depth), pebble.NoSync); err != nil {
 			return err
 		}
 	}
@@ -147,32 +150,24 @@ func (ir *IndexRepository) IndexDocumentWords(docID [32]byte, sequence map[strin
 	for i := 0; i < len(entries); i += iterSize {
 		chunk := entries[i: min(len(entries), i + iterSize)]
 
-		if err := ir.DB.Update(func(txn *badger.Txn) error {
-			for _, entry := range chunk {
-				key := fmt.Appendf(nil, WordDocumentKeyFormat, entry.word, docID)
-				positions := pos[entry.word]
-				if len(positions) > 500 {
-					positions = positions[:500] // более 500 вхождений одного слова в один документ....
-				}
-
-				wcp := model.WordCountAndPositions{
-					Count:     entry.freq,
-					Positions: positions,
-				}
-				val, err := json.Marshal(wcp)
-				if err != nil {
-					return err
-				}
-				if len(val) > 1024 * 1024 { // нужен ли нам текстовый токен более 1 мб? я думаю нет, я правда не сильно верю что это условие вообще хоть раз отработает
-					continue
-				}
-				if err := txn.Set(key, val); err != nil {
-					return err
-				}
+		for _, entry := range chunk {
+			key := fmt.Appendf(nil, WordDocumentKeyFormat, entry.word, docID)
+			positions := pos[entry.word]
+			if len(positions) > 500 {
+				positions = positions[:500] // более 500 вхождений одного слова в один документ....
 			}
-			return nil
-		}); err != nil {
-			return fmt.Errorf("failed to update chunk %d: %w", i, err)
+
+			wcp := model.WordCountAndPositions{
+				Count:     entry.freq,
+				Positions: positions,
+			}
+			val := marshalWCP(wcp)
+			if len(val) > 1024 * 1024 { // нужен ли нам текстовый токен более 1 мб? я думаю нет, я правда не сильно верю что это условие вообще хоть раз отработает
+				continue
+			}
+			if err := ir.DB.Set(key, val, pebble.NoSync); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -182,34 +177,78 @@ func (ir *IndexRepository) IndexDocumentWords(docID [32]byte, sequence map[strin
 func (ir *IndexRepository) GetDocumentsByWord(word string) (map[[32]byte]model.WordCountAndPositions, error) {
 	revertWordIndex := make(map[[32]byte]model.WordCountAndPositions)
 	wprefix := fmt.Appendf(nil, "ri:%s_", word)
-	return revertWordIndex, ir.DB.View(func(txn *badger.Txn) error {
-		it := txn.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		for it.Seek(wprefix); it.ValidForPrefix(wprefix); it.Next() {
-			item := it.Item()
-			keyPart := item.Key()[len(wprefix):]
-
-			decoded, err := hex.DecodeString(string(keyPart))
-			if err != nil {
-				return err
-			}
-			id := [32]byte{}
-			copy(id[:], decoded)
-
-			val, err := item.ValueCopy(nil)
-			if err != nil {
-				return err
-			}
-			positions := model.WordCountAndPositions{}
-			if err := json.Unmarshal(val, &positions); err != nil {
-				return err
-			}
-
-			revertWordIndex[id] = positions
-		}
-		
-		return nil
+	it, err := ir.DB.NewIter(&pebble.IterOptions{
+		LowerBound: wprefix,
+		UpperBound: prefixUpperBound(wprefix),
 	})
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.First(); it.Valid(); it.Next() {
+		keyPart := it.Key()[len(wprefix):]
+
+		decoded, err := hex.DecodeString(string(keyPart))
+		if err != nil {
+			return nil, err
+		}
+		id := [32]byte{}
+		copy(id[:], decoded)
+
+		positions := model.WordCountAndPositions{}
+		if positions, err = unmarshalWCP(it.Value()); err != nil {
+			return nil, err
+		}
+
+		revertWordIndex[id] = positions
+	}
+	return revertWordIndex, nil
+}
+
+func prefixUpperBound(prefix []byte) []byte {
+    upper := make([]byte, len(prefix))
+    copy(upper, prefix)
+    for i := len(upper) - 1; i >= 0; i-- {
+        upper[i]++
+        if upper[i] != 0 {
+            return upper[:i+1]
+        }
+    }
+    return nil
+}
+
+func marshalWCP(wcp model.WordCountAndPositions) []byte {
+    size := 2 + len(wcp.Positions)*8
+    buf := make([]byte, size)
+    binary.LittleEndian.PutUint16(buf[0:], uint16(wcp.Count))
+    for i, p := range wcp.Positions {
+        binary.LittleEndian.PutUint32(buf[2+i*4:], encPosEntry(p.Type, p.I))
+    }
+    return buf
+}
+
+func unmarshalWCP(data []byte) (model.WordCountAndPositions, error) {
+    if len(data) < 2 {
+        return model.WordCountAndPositions{}, fmt.Errorf("data is unexpectable short")
+    }
+    count := binary.LittleEndian.Uint16(data[0:])
+    positions := make([]model.Position, min(count, 500))
+    for i := range positions {
+		t, p := decPosEntry(binary.LittleEndian.Uint32(data[2+i*4:]))
+        positions[i] = model.Position{
+            Type: t,
+			I: p,
+        }
+    }
+    return model.WordCountAndPositions{Count: int(count), Positions: positions}, nil
+}
+
+func encPosEntry(a byte, p int) uint32 {
+	return uint32((p << 1) | int(a))
+}
+
+func decPosEntry(d uint32) (byte, int) {
+	return byte(d & 1), int(d >> 1)
 }
 
 const biK = "big:%d:%d"
@@ -217,47 +256,47 @@ const biK = "big:%d:%d"
 func (ir *IndexRepository) UpdateBiFreq(biS map[[2]uint64]int) error {
 	ir.mu.Lock()
 	defer ir.mu.Unlock()
+	b := ir.DB.NewBatch()
+	c := 0
 	for lr, freq := range biS {
-		if err := ir.DB.Update(func(txn *badger.Txn) error {
-			key := fmt.Appendf(nil, biK, lr[0], lr[1])
-			item, err := txn.Get(key)
-			if err != nil && err != badger.ErrKeyNotFound {
-				return err
-			}
-			if err != badger.ErrKeyNotFound {
-				val, err := item.ValueCopy(nil)
-				if err != nil {
-					return err
-				}
-				freq += decCount(val)
-			}
-			return txn.Set(key, encCount(freq))
-		}); err != nil {
+		key := fmt.Appendf(nil, biK, lr[0], lr[1])
+		val, closer, err := ir.DB.Get(key)
+		if err != nil && err != pebble.ErrNotFound {
+			b.Close()
 			return err
 		}
+		if err == nil {
+			freq += decCount(val)
+			closer.Close()
+		}
+		if err := b.Set(key, encCount(freq), nil); err != nil {
+			b.Close()
+			return err
+		}
+		c++
+		if c == 20 {
+			if err := b.Commit(pebble.NoSync); err != nil {
+				return err
+			}
+			b = ir.DB.NewBatch()
+			c = 0
+		}
 	}
-	return nil
+	return b.Commit(pebble.NoSync)
 }
 
 func (ir *IndexRepository) GetFreq(l, r uint64) (int, error) {
-	ir.mu.Lock()
-	defer ir.mu.Unlock()
 	freq := 0
-	return freq, ir.DB.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(fmt.Appendf(nil, biK, l, r))
-		if err != nil {
-			if err == badger.ErrKeyNotFound {
-				return nil
-			}
-			return err
+	val, closer, err := ir.DB.Get(fmt.Appendf(nil, biK, l, r))
+	if err != nil {
+		if err == pebble.ErrNotFound {
+			return 0, nil
 		}
-		val, err := item.ValueCopy(nil)
-		if err != nil {
-			return err
-		}
-		freq = decCount(val)
-		return nil
-	})
+		return 0, err
+	}
+	freq = decCount(val)
+	closer.Close()
+	return freq, nil
 }
 
 func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys Cacher) {
@@ -274,32 +313,25 @@ func (ir *IndexRepository) alloc(startPos *uint32, await chan srequest, cacheSys
 		seq := &sequence{}
 		if val := cacheSys.Get(entry.word); val == nil {
 			key := fmt.Appendf(nil, wordKey, entry.word)
-			if err := ir.DB.Update(func(txn *badger.Txn) error {
-				it, err := txn.Get(key)
-				if err == nil {
-					it.Value(func(val []byte) error {
-						seq.id = binary.LittleEndian.Uint32(val)
-						seq.loaded = true
-						return nil
-					})
-					return nil
-				}
-
+			val, closer, err := ir.DB.Get(key)
+			if err == nil {
+				seq.id = binary.LittleEndian.Uint32(val)
+				seq.loaded = true
+				closer.Close()
+			} else {
 				data := [4]byte{}
 				seq.id = atomic.AddUint32(startPos, 1)
 				binary.LittleEndian.PutUint32(data[:], seq.id)
-				if err := txn.Set(key, data[:]); err != nil {
-					return err
+				if err := ir.DB.Set(key, data[:], pebble.NoSync); err != nil {
+					ir.log.Errorf("allocation failed: %v", err)
+					return
 				}
-				if err := txn.Set(fmt.Appendf(nil, seqKey, seq.id), []byte(entry.word)); err != nil {
-					return err
+				if err := ir.DB.Set(fmt.Appendf(nil, seqKey, seq.id), []byte(entry.word), pebble.NoSync); err != nil {
+					ir.log.Errorf("allocation failed: %v", err)
+					return
 				}
-				return nil
-			}); err != nil {
-				ir.log.Errorf("allocation failed: %v", err)
-				return
+				cacheSys.Put(entry.word, seq)
 			}
-			cacheSys.Put(entry.word, seq)
 		} else {
 			*seq = *val.(*sequence)
 			seq.loaded = true

@@ -62,10 +62,10 @@ func NewScrapeConfig(baseUrls []string, cachePath string, logWriter io.Writer, w
 }
 
 const (
-	userAgent    = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
+	userAgent    = "WFTSBot/1.0"
 	crawlTime    = 300 * time.Second
 	deadlineTime = 15 * time.Second
-	numOfTries   = 3 // если кто то решил поменять это на 0, чтож, удачи
+	numOfTries   = 3 // если кто-то решил поменять это на 0, чтож, удачи
 )
 
 func NewScraper(cfg *configData, idx indexer, c context.Context) (*WebScraper, error) {
@@ -87,7 +87,7 @@ func NewScraper(cfg *configData, idx indexer, c context.Context) (*WebScraper, e
 		mu: 	   &sync.Mutex{},
 		globalCtx: c,
 	}
-	stack, err := InitStack(cfg.LocalCachePath, 64 << 20)
+	stack, err := InitStack(cfg.LocalCachePath, 128 << 20)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 			} else {
 				encoded, err := ws.GetPageUrlsByHash(hashed)
 				if err != nil {
-					if err.Error() != "Key not found" {
+					if err.Error() != "pebble: not found" {
 						log.Errorf("error getting urls, from db: %v", err)
 					}
 					return model.Error
@@ -239,7 +239,7 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 			if links, err = ws.fetchHTMLcontent(ctx, &priority, curLink.Link, normalized, curLink.Depth); err != nil {
 				return model.Error
 			}
-			visPenalty = prevDepth.(int) - curLink.Depth
+			visPenalty = 0
 		}
 
 		if len(links) == 0 {
@@ -275,10 +275,8 @@ func (ws *WebScraper) ScrapeWithContext(ctx context.Context, curLink *model.Link
 		if link.SameDomain {
 			link.Priority *= 2
 		}
-		if visPenalty != 0 {
-			link.Priority *= 0.5
-		}
-		link.Priority = link.Priority / (curLink.Priority * float64(curLink.Depth + 1)) * math.Exp(-0.9*float64(visPenalty))
+		depthPriority := 1.0 / float64(link.Depth) / float64(visPenalty)
+		link.Priority = link.Priority * 3 * depthPriority * math.Pow(curLink.Priority, 0.6)
 
 		ws.pool.Submit(link)
 	}

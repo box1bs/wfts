@@ -94,7 +94,7 @@ func (idx *Indexer) HandleDocumentWords(ctx context.Context, doc *model.Document
 	}
 
 	*priority *= (1 - sim)
-	*priority *= (float64(utokens) / float64(doc.TokenCount)) // (1 + sameDomain) * (log(linksNumber + 1) * (1 - simRate) * (UniqTokenCount / TokenCount) / (log(tokenCount + 1) + 1) * e**(a * (maxDepth - (scrapedDepth - depth))) // наивная метрика приоритизации
+	*priority *= (float64(utokens) / float64(doc.TokenCount)) // (1 + sameDomain) * (log(linksNumber + 1) * (1 - simRate) * (UniqTokenCount / TokenCount) / (log(tokenCount + 1) + 1) * γ * (1 / Depth / Visited penalty) * parent.Priority ** β // наивная метрика приоритизации
 	return nil
 }
 

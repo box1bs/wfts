@@ -30,7 +30,6 @@ func run(ctx context.Context) error {
 	backupWG := &sync.WaitGroup{}
 	var (
 		configFile = flag.String("config", "default.json", "Path to configuration file")
-		// indexFlag = flag.Bool("i", false, "disable indexing")
 	)
 	flag.Parse()
 

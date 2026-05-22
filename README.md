@@ -30,3 +30,15 @@ make docker-run
 mkdir .data
 make run
 ```
+
+## Two-day benchmark(MS Azure VM B1ms)
+* documents idexed: 48963
+* memory availability metrics:
+![first day metrics](./internal/assets/may10m.png)
+![second day metrics](./internal/assets/may11m.png)
+* disk writes:
+![first day metrics](./internal/assets/may10d.png)
+![second day metrics](./internal/assets/may11d.png)
+* network out:
+![first day metrics](./internal/assets/may10n.png)
+![second day metrics](./internal/assets/may11n.png)

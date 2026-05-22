@@ -30,10 +30,9 @@
         "https://slashdot.org"
     ],
     "info_log_path" : "",
-    "backup_path" : "./.data/queue.bin",
+    "cache_path" : "./.data/queue.bin",
     "index_path" : "./.data",
-    "worker_count" : 40,
-    "max_depth_crawl" : 8,
+    "worker_count" : 48,
     "max_typo" : 3,
     "only_same_domain" : false
 }
