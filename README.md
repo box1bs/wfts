@@ -1,4 +1,4 @@
-# WFTS 
+# Web Full Text Search Engine
 ![[passing badge](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge)](https://github.com/box1bs/wfts/actions/workflows/build.yml/badge.svg) [![Release](https://img.shields.io/github/v/release/box1bs/wfts?logo=go&logoColor=sky)](https://github.com/box1bs/wfts/releases/latest)
 
 ## The project is an asynchronous HTML page crawler for English-language content, with an integrated search engine and spell-cheching.
