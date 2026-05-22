@@ -29,7 +29,6 @@
         "https://venturebeat.com",
         "https://slashdot.org"
     ],
-    "info_log_path" : "",
     "cache_path" : "./.data/queue.bin",
     "index_path" : "./.data",
     "worker_count" : 48,
