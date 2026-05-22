@@ -1,4 +1,7 @@
-# The project is an asynchronous HTML page crawler for English-language content, with an integrated search engine and spell-cheching.
+# WFTS 
+![[passing badge](https://img.shields.io/badge/build-passing-brightgreen?style=for-the-badge)](https://github.com/box1bs/wfts/actions/workflows/build.yml/badge.svg) [![Release](https://img.shields.io/github/v/release/box1bs/wfts?logo=go&logoColor=sky)](https://github.com/box1bs/wfts/releases/latest)
+
+## The project is an asynchronous HTML page crawler for English-language content, with an integrated search engine and spell-cheching.
 
 ## Demo
 [![Video vs-code-demo](https://private-user-images.githubusercontent.com/190737632/584275984-7e03eaa9-8e8f-405a-85f7-fdacf785eca8.png?jwt=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJpc3MiOiJnaXRodWIuY29tIiwiYXVkIjoicmF3LmdpdGh1YnVzZXJjb250ZW50LmNvbSIsImtleSI6ImtleTUiLCJleHAiOjE3NzczMDE0NzcsIm5iZiI6MTc3NzMwMTE3NywicGF0aCI6Ii8xOTA3Mzc2MzIvNTg0Mjc1OTg0LTdlMDNlYWE5LThlOGYtNDA1YS04NWY3LWZkYWNmNzg1ZWNhOC5wbmc_WC1BbXotQWxnb3JpdGhtPUFXUzQtSE1BQy1TSEEyNTYmWC1BbXotQ3JlZGVudGlhbD1BS0lBVkNPRFlMU0E1M1BRSzRaQSUyRjIwMjYwNDI3JTJGdXMtZWFzdC0xJTJGczMlMkZhd3M0X3JlcXVlc3QmWC1BbXotRGF0ZT0yMDI2MDQyN1QxNDQ2MTdaJlgtQW16LUV4cGlyZXM9MzAwJlgtQW16LVNpZ25hdHVyZT1iOWQ2MmI5OWU0NGIyYWVlMzQ1MDcyYjZhZjAxYTRhOWIwMzQ4NThkNzJjYmU4NjMzYjY3NWUxMGNkY2UzYTE5JlgtQW16LVNpZ25lZEhlYWRlcnM9aG9zdCZyZXNwb25zZS1jb250ZW50LXR5cGU9aW1hZ2UlMkZwbmcifQ.-N-DXTWgA2kgmLDN4O9fQEeIXkncWyR2qR8I5kn5na0)](https://github.com/user-attachments/assets/7866524a-54cf-4d7d-b6a0-b6b869bee8e9)
