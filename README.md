@@ -4,7 +4,7 @@
 ## The project is an asynchronous HTML page crawler for English-language content, with an integrated search engine and spell-cheching.
 
 ## Data flow
-(Urls from .json || HTTP API urls adding) => Crawler => Scheduler => Indexer => Storage <= Searcher <= HTTP API searching
+Seed URLs (config / API) => Crawler => Scheduler => Indexer => Storage <= Searcher <= HTTP API
 
 ## Package diagram
 ![package_diagram](./internal/assets/package_diagram.drawio.svg)
