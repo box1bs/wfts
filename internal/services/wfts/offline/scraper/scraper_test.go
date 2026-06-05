@@ -27,7 +27,7 @@ func TestHtmlGetter(t *testing.T) {
     
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin"}, nil, context.Background())
+            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin", FilterUrl: "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"}, nil, context.Background())
             if err != nil {
                 t.Fatalf("scraper initialization failed: %v", err)
             }
@@ -104,7 +104,7 @@ func TestHaveSitemap(t *testing.T) {
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             parsed, _ := url.Parse(tt.input)
-            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin"}, nil, context.Background())
+            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin", FilterUrl: "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"}, nil, context.Background())
             if err != nil {
                 t.Fatalf("scraper initialization failed: %v", err)
             }
