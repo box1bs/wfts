@@ -15,7 +15,6 @@ const (
 	seqKey = "num:%d"
 	inck = "inc:"
 	shardSize = 26
-	a, b = 2654435761, 2246822519 // константы для рандомизации битов
 )
 
 type shingleIndex struct {

@@ -30,6 +30,7 @@
         "https://slashdot.org"
     ],
     "cache_path" : "./.data/queue.bin",
+    "filter_url" : "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt",
     "index_path" : "./.data",
     "worker_count" : 48,
     "max_typo" : 3,
