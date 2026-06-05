@@ -27,7 +27,7 @@ func TestHtmlGetter(t *testing.T) {
     
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin"}, nil, context.Background())
+            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin", FilterUrl: "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"}, nil, context.Background())
             if err != nil {
                 t.Fatalf("scraper initialization failed: %v", err)
             }
@@ -77,26 +77,27 @@ func TestHaveSitemap(t *testing.T) {
             name:  "google sitemap index",
             input: "https://www.google.com/",
             expected: []string{
-                "https://www.google.com/gmail/sitemap.xml",
-                "https://www.google.com/forms/sitemaps.xml",
-                "https://www.google.com/slides/sitemaps.xml",
-                "https://www.google.com/sheets/sitemaps.xml",
-                "https://www.google.com/drive/sitemap.xml",
-                "https://www.google.com/docs/sitemaps.xml",
-                "https://www.google.com/get/sitemap.xml",
-                "https://www.google.com/travel/flights/sitemap.xml",
                 "https://www.google.com/admob/sitemap.xml",
-                "https://www.google.com/partners/about/sitemap.xml",
-                "https://www.google.com/adwords/sitemap.xml",
                 "https://www.google.com/adsense/start/sitemap.xml",
-                "https://www.google.com/chromebook/sitemap.xml",
-                "https://www.google.com/chrome/sitemap.xml",
+                "https://www.google.com/adwords/sitemap.xml",
                 "https://www.google.com/calendar/about/sitemap.xml",
-                "https://www.google.com/photos/sitemap.xml",
-                "https://www.google.com/nonprofits/sitemap.xml",
+                "https://www.google.com/chrome/sitemap.xml",
+                "https://www.google.com/chromebook/sitemap.xml",
+                "https://www.google.com/docs/sitemaps.xml",
+                "https://www.google.com/drive/sitemap.xml",
                 "https://www.google.com/finance/sitemap.xml",
-                "https://www.google.com/shopping/sitemap.xml",
+                "https://www.google.com/forms/sitemaps.xml",
+                "https://www.google.com/get/sitemap.xml",
+                "https://www.google.com/gmail/sitemap.xml",
                 "https://www.google.com/grants/sitemap.xml",
+                "https://www.google.com/nonprofits/sitemap.xml",
+                "https://www.google.com/partners/about/sitemap.xml",
+                "https://www.google.com/photos/sitemap.xml",
+                "https://www.google.com/sheets/sitemaps.xml",
+                "https://www.google.com/shopping/sitemap.xml",
+                "https://www.google.com/slides/sitemaps.xml",
+                "https://www.google.com/travel/flights/sitemap.xml",
+                "https://www.google.com/maps/sitemap.xml",
             },
         },
     }
@@ -104,7 +105,7 @@ func TestHaveSitemap(t *testing.T) {
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
             parsed, _ := url.Parse(tt.input)
-            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin"}, nil, context.Background())
+            ws, err := NewScraper(&configData{LocalCachePath: "queue.bin", FilterUrl: "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"}, nil, context.Background())
             if err != nil {
                 t.Fatalf("scraper initialization failed: %v", err)
             }
