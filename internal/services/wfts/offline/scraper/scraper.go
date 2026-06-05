@@ -10,6 +10,7 @@ import (
 
 	"wfts/internal/model"
 	lrucache "wfts/internal/services/wfts/offline/scraper/lruCache"
+	"wfts/internal/services/wfts/offline/scraper/roundTripper"
 	"wfts/internal/utils/scheduler"
 
 	"context"
@@ -44,6 +45,7 @@ type WebScraper struct {
 type configData struct {
 	StartURLs      []string
 	LocalCachePath string
+	FilterUrl	   string
 	LogOutput      io.Writer
 	WorkersNum     int
 	OnlySameDomain bool
@@ -51,10 +53,11 @@ type configData struct {
 
 const canceled = "context canceled"
 
-func NewScrapeConfig(baseUrls []string, cachePath string, logWriter io.Writer, workerNum int, onlySameDomain bool) *configData {
+func NewScrapeConfig(baseUrls []string, cachePath string, filterUrl string, logWriter io.Writer, workerNum int, onlySameDomain bool) *configData {
 	return &configData{
 		StartURLs:      baseUrls,
 		LocalCachePath: cachePath,
+		FilterUrl: 		filterUrl,
 		LogOutput:      logWriter,
 		WorkersNum:     workerNum,
 		OnlySameDomain: onlySameDomain,
@@ -69,15 +72,19 @@ const (
 )
 
 func NewScraper(cfg *configData, idx indexer, c context.Context) (*WebScraper, error) {
+	rt, err := roundTripper.SetUpRoundTripper(cfg.FilterUrl, &http.Transport{
+		IdleConnTimeout:   deadlineTime,
+		DisableKeepAlives: false,
+		ForceAttemptHTTP2: true,
+	})
+	if err != nil {
+		return nil, err
+	}
 	ws := &WebScraper{
 		indexer: idx,
 		client: &http.Client{
 			Timeout: 2 * deadlineTime,
-			Transport: &http.Transport{
-				IdleConnTimeout:   deadlineTime,
-				DisableKeepAlives: false,
-				ForceAttemptHTTP2: true,
-			},
+			Transport: rt,
 		},
 		visited:   new(sync.Map),
 		cfg:       cfg,

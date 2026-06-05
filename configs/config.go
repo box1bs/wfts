@@ -8,6 +8,7 @@ import (
 type ConfigData struct {
 	BaseURLs       			[]string 	`json:"base_urls" validate:"required,len=1:500"`
 	CachePath				string		`json:"cache_path" validate:"required"`
+	FilterUrl				string 		`json:"filter_url" validate:"required"`
 	IndexPath     			string   	`json:"index_path" validate:"required"`
 	WorkersCount   			int      	`json:"worker_count" validate:"min=50,max=2000"`
 	MaxTypo	  				int      	`json:"max_typo" validate:"min=1,max=4"`

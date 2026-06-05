@@ -94,7 +94,7 @@ func (f *Factory) StartCrawling(outerCtx context.Context, config *configs.Config
 	var err error
 	f.startPoint = time.Now()
 	f.innerCtx, f.controller = context.WithCancel(outerCtx)
-	f.scraper, err = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.CachePath, os.Stdout, config.WorkersCount, config.OnlySameDomain), f.indexer, f.innerCtx)
+	f.scraper, err = scraper.NewScraper(scraper.NewScrapeConfig(config.BaseURLs, config.CachePath, config.FilterUrl, os.Stdout, config.WorkersCount, config.OnlySameDomain), f.indexer, f.innerCtx)
 	if err != nil {
 		return err
 	}
